@@ -2,7 +2,7 @@
 
 import express from 'express';
 import { protect, allowRoles } from '../middlewares/authMiddleware.js';
-import { getAgentLoans } from '../controllers/agentController.js';
+import { getAgentLoans, getCustomerDetails } from '../controllers/agentController.js';
 
 const router = express.Router();
 
@@ -12,6 +12,14 @@ router.get(
   protect,
   allowRoles('AGENT'),
   getAgentLoans
+);
+
+// Get customer details by ID
+router.get(
+  '/customer/:customerId',
+  protect,
+  allowRoles('AGENT'),
+  getCustomerDetails
 );
 
 export default router;
