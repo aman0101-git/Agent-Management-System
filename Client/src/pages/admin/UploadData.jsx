@@ -103,8 +103,8 @@ const UploadData = () => {
         { headers }
       );
       setMessage(res.data.message || "Upload completed");
-    } catch {
-      setError("Upload failed");
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "Upload failed");
     } finally {
       setLoading(false);
     }

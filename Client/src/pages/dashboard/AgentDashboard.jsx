@@ -2,45 +2,60 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { fetchAgentLoans } from "@/api/agentApi";
+import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
 
 const AgentDashboard = () => {
   const { user, token, logout } = useAuth();
+
   const [loans, setLoans] = useState([]);
+  const [filteredLoans, setFilteredLoans] = useState([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
+
+  const [selectedCustomerId, setSelectedCustomerId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   useEffect(() => {
     const loadLoans = async () => {
       try {
         const res = await fetchAgentLoans(token);
         setLoans(res.data || []);
-      } catch (err) {
-        console.error("Failed to fetch agent loans", err);
+        setFilteredLoans(res.data || []);
       } finally {
         setLoading(false);
       }
     };
-
     loadLoans();
   }, [token]);
+
+  useEffect(() => {
+    if (!search) setFilteredLoans(loans);
+    else {
+      setFilteredLoans(
+        loans.filter((l) =>
+          String(l.mobileno || "").includes(search)
+        )
+      );
+    }
+  }, [search, loans]);
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200">
       {/* Header */}
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
+        <div className="mx-auto max-w-7xl px-6 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">
               Agent Dashboard
             </h1>
             <p className="text-sm text-slate-500">
-              Daily collection & calling workspace
+              {filteredLoans.length} allocated accounts
             </p>
           </div>
 
           <Button
-            variant="destructive"
             onClick={logout}
-            className="bg-rose-600 text-white shadow-md hover:bg-rose-700"
+            className="bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800 shadow-md"
           >
             Logout
           </Button>
@@ -48,58 +63,66 @@ const AgentDashboard = () => {
       </header>
 
       {/* Main */}
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <div className="rounded-2xl border bg-white shadow">
-          <div className="border-b p-4">
-            <h2 className="text-lg font-semibold">
-              Welcome, {user.firstName}
-            </h2>
-            <p className="text-sm text-slate-500">
-              Allocated Accounts
-            </p>
+      <main className="mx-auto max-w-7xl px-6 py-8">
+        {/* Search */}
+        <input
+          type="text"
+          placeholder="Search by mobile number"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          className="mb-8 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm focus:ring-2 focus:ring-indigo-400/40"
+        />
+
+        {loading && (
+          <p className="text-slate-500">Loading customers…</p>
+        )}
+
+        {!loading && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+            {filteredLoans.map((loan) => (
+              <button
+                key={loan.id}
+                onClick={() => {
+                  setSelectedCustomerId(loan.id);
+                  setDrawerOpen(true);
+                }}
+                className="group rounded-2xl border bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg focus:outline-none"
+              >
+                <p className="font-semibold text-slate-900 truncate">
+                  {loan.cust_name}
+                </p>
+                <p className="text-sm text-slate-500">
+                  {loan.mobileno}
+                </p>
+
+                <div className="mt-4 space-y-1 text-sm">
+                  <p>
+                    <span className="text-slate-500">POS:</span>{" "}
+                    ₹{loan.pos || 0}
+                  </p>
+                  <p>
+                    <span className="text-slate-500">Branch:</span>{" "}
+                    {loan.branch_name || "-"}
+                  </p>
+                </div>
+
+                <div className="mt-4 text-xs text-indigo-600 opacity-0 group-hover:opacity-100 transition">
+                  View details →
+                </div>
+              </button>
+            ))}
           </div>
-
-          {/* Content */}
-          <div className="p-4 overflow-x-auto">
-            {loading && (
-              <p className="text-sm text-slate-500">Loading data...</p>
-            )}
-
-            {!loading && loans.length === 0 && (
-              <p className="text-sm text-slate-500">
-                No accounts allocated yet.
-              </p>
-            )}
-
-            {!loading && loans.length > 0 && (
-              <table className="w-full text-sm border">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="p-2 border">Customer</th>
-                    <th className="p-2 border">Mobile</th>
-                    <th className="p-2 border">Loan ID</th>
-                    <th className="p-2 border">Outstanding</th>
-                    <th className="p-2 border">DPD</th>
-                    <th className="p-2 border">State</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loans.map((loan) => (
-                    <tr key={loan.id} className="hover:bg-slate-50">
-                      <td className="p-2 border">{loan.cust_name}</td>
-                      <td className="p-2 border">{loan.mobileno}</td>
-                      <td className="p-2 border">{loan.appl_id}</td>
-                      <td className="p-2 border">{loan.amt_outst}</td>
-                      <td className="p-2 border">{loan.dpd}</td>
-                      <td className="p-2 border">{loan.state}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </div>
+        )}
       </main>
+
+      <CustomerDetailDrawer
+        customerId={selectedCustomerId}
+        isOpen={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false);
+          setSelectedCustomerId(null);
+        }}
+      />
     </div>
   );
 };

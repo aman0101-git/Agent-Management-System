@@ -13,3 +13,14 @@ export const fetchAgentLoans = async (token) => {
 
   return res.data;
 };
+
+// Fetch customer details by ID
+export const fetchCustomerDetails = async (customerId, token) => {
+  const res = await axios.get(`${API_BASE}/customer/${customerId}`, {
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
