@@ -3,9 +3,9 @@ import axios from "axios";
 
 const API_BASE = "http://localhost:5000/api/agent";
 
-// Fetch allocated loans for agent
-export const fetchAgentLoans = async (token) => {
-  const res = await axios.get(`${API_BASE}/loans`, {
+// Fetch allocated cases for agent
+export const fetchAgentCases = async (token) => {
+  const res = await axios.get(`${API_BASE}/cases`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -14,9 +14,9 @@ export const fetchAgentLoans = async (token) => {
   return res.data;
 };
 
-// Fetch customer details by ID
-export const fetchCustomerDetails = async (customerId, token) => {
-  const res = await axios.get(`${API_BASE}/customer/${customerId}`, {
+// Fetch case details by ID
+export const fetchCaseDetails = async (caseId, token) => {
+  const res = await axios.get(`${API_BASE}/cases/${caseId}`, {
     headers: {
       Authorization: `Bearer ${token}`,
     },
@@ -24,3 +24,22 @@ export const fetchCustomerDetails = async (customerId, token) => {
 
   return res.data;
 };
+
+// Submit disposition for a case
+export const submitDisposition = async (caseId, payload, token) => {
+  const res = await axios.post(
+    `${API_BASE}/cases/${caseId}/disposition`,
+    payload,
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  return res.data;
+};
+
+// Kept for backward compatibility
+export const fetchAgentLoans = fetchAgentCases;
+export const fetchCustomerDetails = fetchCaseDetails;

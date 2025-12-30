@@ -2,10 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import axios from "axios";
-import {
-  distributeCampaignData,
-  fetchCampaignDistributionSummary,
-} from "@/api/campaignApi";
+import { fetchCampaignDistributionSummary } from "@/api/campaignApi";
 
 const ManageCampaigns = () => {
   const { token } = useAuth();
@@ -47,17 +44,6 @@ const ManageCampaigns = () => {
     }
   };
 
-  const handleDistribute = async (campaignId) => {
-    try {
-      const res = await distributeCampaignData(campaignId, token);
-      alert(
-        `Distributed ${res.data.distributed} records to ${res.data.agents} agents`
-      );
-      loadSummary(campaignId);
-    } catch (err) {
-      alert(err.response?.data?.message || "Distribution failed");
-    }
-  };
 
   const loadSummary = async (campaignId) => {
     try {
@@ -140,13 +126,7 @@ const ManageCampaigns = () => {
                     {isActive ? "Deactivate" : "Activate"}
                   </Button>
 
-                  <Button
-                    type="button"
-                    onClick={() => handleDistribute(c.id)}
-                    className="bg-indigo-100 text-indigo-700 hover:bg-indigo-200"
-                  >
-                    Distribute Data
-                  </Button>
+                  {/* Distribution now happens automatically on data ingest */}
 
                   <Button
                     type="button"
