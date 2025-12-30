@@ -2,24 +2,42 @@
 
 import express from 'express';
 import { protect, allowRoles } from '../middlewares/authMiddleware.js';
-import { getAgentLoans, getCustomerDetails } from '../controllers/agentController.js';
+import {
+  getAgentCases,
+  getAgentCaseById,
+  submitDisposition,
+} from '../controllers/agentController.js';
 
 const router = express.Router();
 
-// Agent-only loans fetch
+/**
+ * Fetch agent dashboard list
+ */
 router.get(
-  '/loans',
+  '/cases',
   protect,
   allowRoles('AGENT'),
-  getAgentLoans
+  getAgentCases
 );
 
-// Get customer details by ID
+/**
+ * Fetch single case + disposition history
+ */
 router.get(
-  '/customer/:customerId',
+  '/cases/:caseId',
   protect,
   allowRoles('AGENT'),
-  getCustomerDetails
+  getAgentCaseById
+);
+
+/**
+ * Submit disposition for a case
+ */
+router.post(
+  '/cases/:caseId/disposition',
+  protect,
+  allowRoles('AGENT'),
+  submitDisposition
 );
 
 export default router;
