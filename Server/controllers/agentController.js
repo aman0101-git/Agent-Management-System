@@ -16,6 +16,8 @@ export const getAgentCases = async (req, res) => {
         c.cust_name AS customer_name,
         c.mobileno AS phone,
         c.loan_agreement_no AS loan_id,
+        c.insl_amt,
+        c.pos,
         COALESCE(ac.status, 'NEW') AS status,
         ac.first_call_at,
         ac.last_call_at,
@@ -55,15 +57,34 @@ export const getAgentCaseById = async (req, res) => {
         c.cust_name AS customer_name,
         c.mobileno AS phone,
         c.loan_agreement_no AS loan_id,
+
         c.branch_name,
+        c.hub_name,
+        c.group_name,
+        c.agency,
+
         c.dpd,
         c.pos,
         c.insl_amt,
         c.amt_outst,
         c.tenure,
+        c.penal_over,
+        c.amount_finance,
         c.product_code,
         c.loan_status,
         c.extra_fields,
+
+        c.res_addr,
+        c.off_addr,
+        c.disb_date,
+        c.maturity_date,
+        c.fdd,
+
+        c.agent_id,
+        c.batch_month,
+        c.batch_year,
+        c.campaign_id,
+        c.is_active,
 
         COALESCE(ac.status, 'NEW') AS status,
         ac.first_call_at,
@@ -85,7 +106,7 @@ export const getAgentCaseById = async (req, res) => {
 
     const [dispositions] = await pool.query(
       `
-      SELECT disposition, remarks, notes, created_at
+      SELECT disposition, remarks, promise_amount, created_at
       FROM agent_dispositions
       WHERE agent_case_id = (
         SELECT id FROM agent_cases WHERE coll_data_id = ?
@@ -115,34 +136,49 @@ export const submitDisposition = async (req, res) => {
   try {
     const agentId = req.user.id;
     const { caseId } = req.params;
-    const { disposition, remarks, notes, followUpDate, followUpTime } = req.body;
+
+    const {
+      disposition,
+      remarks,
+      promiseAmount,
+      followUpDate,
+      followUpTime,
+    } = req.body;
 
     const FOLLOWUP_REQUIRED = ['PTP', 'CBC', 'BRP'];
+
+    // 🔒 HARD VALIDATIONS
+    if (!disposition)
+      return res.status(400).json({ message: "Disposition required" });
+
+    if (promiseAmount === undefined || promiseAmount === null)
+      return res.status(400).json({ message: "Promise amount required" });
 
     if (FOLLOWUP_REQUIRED.includes(disposition)) {
       if (!followUpDate || !followUpTime) {
         return res.status(400).json({
-          message: 'Follow-up date and time required',
+          message: "Follow-up date and time required",
         });
       }
     }
 
     await conn.beginTransaction();
 
-    // 1. Verify the Coll_Data record belongs to this agent
+    // 1. Lock coll_data
     const [[collData]] = await conn.query(
-      `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id 
-       FROM coll_data 
-       WHERE id = ? AND agent_id = ? AND is_active = TRUE FOR UPDATE`,
+      `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
+       FROM coll_data
+       WHERE id = ? AND agent_id = ? AND is_active = TRUE
+       FOR UPDATE`,
       [caseId, agentId]
     );
 
     if (!collData) {
       await conn.rollback();
-      return res.status(404).json({ message: 'Case not found' });
+      return res.status(404).json({ message: "Case not found" });
     }
 
-    // 2. Check if agent_cases record exists, if not create it
+    // 2. Ensure agent_cases
     const [[existingCase]] = await conn.query(
       `SELECT id FROM agent_cases WHERE coll_data_id = ?`,
       [caseId]
@@ -151,25 +187,34 @@ export const submitDisposition = async (req, res) => {
     let agentCaseId;
     if (!existingCase) {
       const [result] = await conn.query(
-        `INSERT INTO agent_cases 
-         (agent_id, campaign_id, coll_data_id, customer_name, phone, loan_id, status)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`,
-        [agentId, collData.campaign_id, caseId, collData.cust_name, collData.mobileno, collData.loan_agreement_no, 'NEW']
+        `INSERT INTO agent_cases
+        (agent_id, coll_data_id, customer_name, phone, loan_id, status, allocation_date)
+        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        [
+          agentId,
+          caseId,
+          collData.cust_name,
+          collData.mobileno,
+          collData.loan_agreement_no,
+          'NEW',
+        ]
       );
       agentCaseId = result.insertId;
     } else {
       agentCaseId = existingCase.id;
     }
 
-    // 3. Insert disposition record
+    // 3. SAVE DISPOSITION + AMOUNT
+    const safeRemarks = remarks?.trim() || null;
+
     await conn.query(
       `INSERT INTO agent_dispositions
-       (agent_case_id, disposition, remarks, notes)
-       VALUES (?, ?, ?, ?)`,
-      [agentCaseId, disposition, remarks || null, notes || null]
+      (agent_case_id, disposition, remarks, promise_amount)
+      VALUES (?, ?, ?, ?)`,
+      [agentCaseId, disposition, safeRemarks, promiseAmount]
     );
 
-    // 4. Update agent_cases status
+    // 4. UPDATE STATUS
     await conn.query(
       `UPDATE agent_cases
        SET
@@ -186,24 +231,13 @@ export const submitDisposition = async (req, res) => {
       ]
     );
 
-    // 5. Assign next available unassigned record (if any) from same campaign to this agent
-    const [[nextRecord]] = await conn.query(
-      `SELECT id FROM coll_data WHERE campaign_id = ? AND agent_id IS NULL AND is_active = TRUE ORDER BY id LIMIT 1 FOR UPDATE`,
-      [collData.campaign_id]
-    );
-
-    let nextAssigned = null;
-    if (nextRecord && nextRecord.id) {
-      await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, nextRecord.id]);
-      nextAssigned = nextRecord.id;
-    }
-
     await conn.commit();
 
-    return res.json({ message: 'Disposition saved', status: 'DONE', nextAssigned });
+    return res.json({ message: "Disposition saved", status: "DONE" });
   } catch (err) {
     await conn.rollback();
-    return res.status(500).json({ message: 'Failed to submit disposition' });
+    console.error(err);
+    return res.status(500).json({ message: "Failed to submit disposition" });
   } finally {
     conn.release();
   }

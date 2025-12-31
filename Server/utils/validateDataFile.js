@@ -1,5 +1,6 @@
 // ================= REQUIRED EXCEL STRUCTURE =================
 export const REQUIRED_COLUMNS = [
+  "LOAN AGREEMENT NO",
   "BRANCH NAME",
   "CUSTOMER NAME",
   "MOBILE NUMBER",
@@ -21,10 +22,10 @@ const HEADER_ALIASES = {
   loan_agreement_no: ["loan agreement no"],
   branch_name: ["branch name"],
   hub_name: ["hub name"],
-  cust_name: ["customer name", "name"],
+  cust_name: ["customer name"],
   mobileno: ["mobile number", "mobile"],
   pos: ["pos"],
-  insl_amt: ["inst amt"],
+  insl_amt: ["inst amt", "inst_amt"],
   inst_over: ["inst over"],
   penal_over: ["penal over"],
   amount_finance: ["amt fin"],

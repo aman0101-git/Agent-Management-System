@@ -8,7 +8,7 @@ CREATE TABLE IF NOT EXISTS agent_cases (
   customer_name VARCHAR(255),
   phone VARCHAR(20),
   loan_id VARCHAR(100),
-  status ENUM('NEW', 'DONE') DEFAULT 'NEW',
+  status ENUM('IN_PROGRESS','FOLLOW_UP','NEW', 'DONE') DEFAULT 'NEW',
   first_call_at DATETIME,
   last_call_at DATETIME,
   follow_up_date DATE,

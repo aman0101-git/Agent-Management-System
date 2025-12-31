@@ -63,6 +63,14 @@ const FIXED_COLUMNS = {
   feedback: true,
   ptp_date: true,
   loan_agreement_no: true,
+  hub_name: true,
+  loan_status: true,
+  penal_over: true,
+  amount_finance: true,
+  tenure: true,
+  group_name: true,
+  disb_date: true,
+  maturity_date: true,
 };
 
 export const ingestLoans = async (req, res) => {
@@ -116,6 +124,7 @@ export const ingestLoans = async (req, res) => {
     const normalizedRows = rows.map((row) => {
       const obj = {};
       for (const key of Object.keys(row)) {
+        if (normalize(key) === "name") continue;
         const mappedKey = mapHeader(key) || normalize(key);
         obj[mappedKey] = row[key];
       }
@@ -131,7 +140,6 @@ export const ingestLoans = async (req, res) => {
 
       if (row.customer_name && !row.cust_name) {
         row.cust_name = row.customer_name;
-        delete row.customer_name;
       }
 
       for (const [key, value] of Object.entries(row)) {
