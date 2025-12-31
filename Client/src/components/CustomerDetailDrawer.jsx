@@ -37,9 +37,10 @@ const CustomerDetailDrawer = ({
   const [dispositions, setDispositions] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Form state
+  // Form state (ONLY required addition)
   const [selectedDisposition, setSelectedDisposition] = useState("");
   const [remarks, setRemarks] = useState("");
+  const [promiseAmount, setPromiseAmount] = useState(""); // ✅ ADDED
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpTime, setFollowUpTime] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -68,6 +69,7 @@ const CustomerDetailDrawer = ({
       // reset form
       setSelectedDisposition("");
       setRemarks("");
+      setPromiseAmount(""); // ✅ ADDED
       setFollowUpDate("");
       setFollowUpTime("");
     } finally {
@@ -78,8 +80,14 @@ const CustomerDetailDrawer = ({
   const handleSubmitDisposition = async (e) => {
     e.preventDefault();
 
+    // 🔒 REQUIRED VALIDATIONS
     if (!selectedDisposition) {
       alert("Please select a disposition");
+      return;
+    }
+
+    if (!promiseAmount) {
+      alert("Promise amount is required");
       return;
     }
 
@@ -99,6 +107,7 @@ const CustomerDetailDrawer = ({
         {
           disposition: selectedDisposition,
           remarks,
+          promiseAmount, // ✅ SENT TO BACKEND
           followUpDate: requiresFollowUp(selectedDisposition)
             ? followUpDate
             : null,
@@ -123,10 +132,7 @@ const CustomerDetailDrawer = ({
   return (
     <>
       {/* Overlay */}
-      <div
-        className="fixed inset-0 z-40 bg-black/50"
-        onClick={onClose}
-      />
+      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
 
       {/* Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -152,12 +158,13 @@ const CustomerDetailDrawer = ({
               <div className="space-y-10">
 
                 {/* CUSTOMER + LOAN */}
-                <Section title="Customer & Loan Snapshot">
+                <Section title="Customer Information">
                   <Field label="Customer Name" value={caseData.customer_name} />
                   <Field label="Phone" value={caseData.phone} />
                   <Field label="Loan ID" value={caseData.loan_id} />
                   <Field label="Branch" value={caseData.branch_name} />
                   <Field label="Product" value={caseData.product_code} />
+                  <Field label="Penalty Over" value={caseData.penal_over} />
                   <Field label="Loan Status" value={caseData.loan_status} />
                   <Field label="DPD" value={caseData.dpd} />
                   <Field label="POS" value={caseData.pos} />
@@ -176,69 +183,138 @@ const CustomerDetailDrawer = ({
                   <Field label="Follow-up Time" value={caseData.follow_up_time} />
                 </Section>
 
-                {/* DISPOSITION HISTORY */}
-                {dispositions.length > 0 && (
-                  <Section title="Disposition History">
-                    <div className="col-span-full space-y-3">
-                      {dispositions.map((d, i) => (
-                        <div key={i} className="p-3 border rounded">
-                          <strong>{d.disposition}</strong>
-                          <p className="text-xs text-slate-500">
-                            {new Date(d.created_at).toLocaleString("en-IN")}
-                          </p>
-                          {d.remarks && <p>{d.remarks}</p>}
-                        </div>
-                      ))}
-                    </div>
-                  </Section>
-                )}
+                <Section title="Other Information">
+                  <Field label="Group Name" value={caseData.group_name} />
+                  <Field label="Residence Address" value={caseData.res_addr} />
+                  <Field label="Office Address" value={caseData.off_addr} />
+                  <Field label="Disbursement Date" value={caseData.disb_date} />
+                  <Field label="FDD" value={caseData.fdd} />
+                </Section>
 
-                {/* DISPOSITION FORM */}
+                <Section title="Data Information">
+                  <Field label="Agent ID" value={caseData.agent_id} />
+                  <Field label="Batch Month" value={caseData.batch_month} />
+                  <Field label="Batch Year" value={caseData.batch_year} />
+                  <Field label="Campaign ID" value={caseData.campaign_id} />
+                  <Field label="Is Active" value={caseData.is_active} />
+                </Section>
+
+                {/* DISPOSITION HISTORY */}
+                  {dispositions.length > 0 && (
+                    <Section title="Disposition History">
+                      <div className="col-span-full space-y-3">
+                        {dispositions.map((d, i) => (
+                          <div key={i} className="p-3 border rounded space-y-1">
+                            <div className="flex justify-between items-start">
+                              <strong>{d.disposition}</strong>
+
+                              {/* EDIT BUTTON */}
+                              <button
+                                type="button"
+                                className="text-xs text-indigo-600 hover:underline cursor-pointer"
+                                onClick={(e) => {
+                                  e.stopPropagation(); // CRITICAL
+                                  setSelectedDisposition(d.disposition);
+                                  setPromiseAmount(d.promise_amount || "");
+                                  setRemarks(""); // keep old remarks
+                                }}
+                              >
+                                Edit
+                              </button>
+
+                            </div>
+
+                            <p className="text-xs text-slate-500">
+                              {new Date(d.created_at).toLocaleString("en-IN")}
+                            </p>
+
+                            {d.remarks && <p>{d.remarks}</p>}
+
+                            {d.promise_amount && (
+                              <p className="text-sm text-slate-700">
+                                Promise Amount: <strong>₹{d.promise_amount}</strong>
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </Section>
+                  )}
+
+                {/* SUBMIT DISPOSITION */}
                 {caseData.status !== "DONE" && (
                   <Section title="Submit Disposition">
-                    <form onSubmit={handleSubmitDisposition} className="col-span-full space-y-4">
-                      <select
-                        value={selectedDisposition}
-                        onChange={(e) => setSelectedDisposition(e.target.value)}
-                        className="w-full border rounded px-3 py-2"
-                      >
-                        <option value="">Select Disposition</option>
-                        {Object.values(DISPOSITIONS).map((d) => (
-                          <option key={d.code} value={d.code}>
-                            {d.code} - {d.name}
-                          </option>
-                        ))}
-                      </select>
+                    <form
+                      onSubmit={handleSubmitDisposition}
+                      className="col-span-full grid grid-cols-1 md:grid-cols-2 gap-6"
+                    >
+                      <div className="space-y-3 text-sm">
+                        <select
+                          value={selectedDisposition}
+                          onChange={(e) =>
+                            setSelectedDisposition(e.target.value)
+                          }
+                          className="w-full border rounded px-3 py-2"
+                        >
+                          <option value="">Select Disposition</option>
+                          {Object.values(DISPOSITIONS).map((d) => (
+                            <option key={d.code} value={d.code}>
+                              {d.code} - {d.name}
+                            </option>
+                          ))}
+                        </select>
 
-                      <textarea
-                        value={remarks}
-                        onChange={(e) => setRemarks(e.target.value)}
-                        placeholder="Remarks"
-                        className="w-full border rounded px-3 py-2"
-                      />
+                        <textarea
+                          value={remarks}
+                          onChange={(e) => setRemarks(e.target.value)}
+                          placeholder="Remarks"
+                          rows={4}
+                          className="w-full border rounded px-3 py-2 resize-none"
+                        />
+                      </div>
 
-                      {requiresFollowUp(selectedDisposition) && (
-                        <div className="grid grid-cols-2 gap-4">
-                          <input
-                            type="date"
-                            value={followUpDate}
-                            onChange={(e) => setFollowUpDate(e.target.value)}
-                          />
-                          <input
-                            type="time"
-                            value={followUpTime}
-                            onChange={(e) => setFollowUpTime(e.target.value)}
-                          />
+                      <div className="space-y-3 text-sm">
+                        <input
+                          type="number"
+                          placeholder="Promise / Amount"
+                          value={promiseAmount}
+                          onChange={(e) =>
+                            setPromiseAmount(e.target.value)
+                          }
+                          className="w-full border rounded px-3 py-2"
+                        />
+
+                        {requiresFollowUp(selectedDisposition) && (
+                          <div className="flex gap-3">
+                            <input
+                              type="date"
+                              value={followUpDate}
+                              onChange={(e) =>
+                                setFollowUpDate(e.target.value)
+                              }
+                              className="border rounded px-2 py-1"
+                            />
+                            <input
+                              type="time"
+                              value={followUpTime}
+                              onChange={(e) =>
+                                setFollowUpTime(e.target.value)
+                              }
+                              className="border rounded px-2 py-1"
+                            />
+                          </div>
+                        )}
+
+                        <div className="flex justify-end pt-17">
+                          <button
+                            type="submit"
+                            disabled={submitting}
+                            className="px-5 py-2 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
+                          >
+                            {submitting ? "..." : "Submit"}
+                          </button>
                         </div>
-                      )}
-
-                      <button
-                        type="submit"
-                        disabled={submitting}
-                        className="w-full bg-indigo-600 text-white py-2 rounded"
-                      >
-                        {submitting ? "Submitting..." : "Submit"}
-                      </button>
+                      </div>
                     </form>
                   </Section>
                 )}

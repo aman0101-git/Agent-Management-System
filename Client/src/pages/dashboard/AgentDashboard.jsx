@@ -27,7 +27,6 @@ const AgentDashboard = () => {
       }
     };
     loadCases();
-    // expose loader for child callbacks
     window.__reloadAgentCases = loadCases;
   }, [token]);
 
@@ -39,7 +38,9 @@ const AgentDashboard = () => {
         cases.filter(
           (c) =>
             String(c.phone || "").includes(search) ||
-            String(c.customer_name || "").toLowerCase().includes(search.toLowerCase()) ||
+            String(c.customer_name || "")
+              .toLowerCase()
+              .includes(search.toLowerCase()) ||
             String(c.loan_id || "").includes(search)
         )
       );
@@ -67,7 +68,7 @@ const AgentDashboard = () => {
     } else if (status === "DONE") {
       return `${baseClass} bg-green-100 text-green-700`;
     }
-    return baseClass;
+    return `${baseClass} bg-slate-100 text-slate-700`;
   };
 
   return (
@@ -115,50 +116,69 @@ const AgentDashboard = () => {
             {/* Header Row */}
             <div className="grid grid-cols-12 gap-4 bg-slate-50 px-4 py-3 border-b border-slate-200 text-sm font-semibold text-slate-700">
               <div className="col-span-2">Name</div>
-              <div className="col-span-2">Phone</div>
+              <div className="col-span-1">Phone</div>
               <div className="col-span-2">Loan ID</div>
               <div className="col-span-1">Status</div>
               <div className="col-span-1">Alloc. Date</div>
-              <div className="col-span-2">Follow-up</div>
+              <div className="col-span-1">Inst. Amt</div>
+              <div className="col-span-1">POS</div>
+              <div className="col-span-1">Follow-up</div>
               <div className="col-span-1 text-right">Action</div>
             </div>
 
             {/* Data Rows */}
             {filteredCases.map((caseItem) => (
               <div key={caseItem.case_id}>
-                {/* Main Row */}
                 <button
-                  onClick={() => {
-                    if (expandedRowId === caseItem.case_id) {
-                      setExpandedRowId(null);
-                    } else {
-                      setExpandedRowId(caseItem.case_id);
-                    }
-                  }}
-                  className="w-full grid grid-cols-12 gap-4 px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition text-sm text-left group"
+                  onClick={() =>
+                    setExpandedRowId(
+                      expandedRowId === caseItem.case_id
+                        ? null
+                        : caseItem.case_id
+                    )
+                  }
+                  className="w-full grid grid-cols-12 gap-4 px-4 py-3 border-b border-slate-100 hover:bg-slate-50 transition text-sm text-left"
                 >
-                  <div className="col-span-2 font-medium text-slate-900 truncate">
+                  <div className="col-span-2 font-medium truncate">
                     {caseItem.customer_name || "-"}
                   </div>
-                  <div className="col-span-2 text-slate-600 truncate">
+
+                  <div className="col-span-1 text-slate-600 truncate">
                     {caseItem.phone || "-"}
                   </div>
+
                   <div className="col-span-2 text-slate-600 truncate">
                     {caseItem.loan_id || "-"}
                   </div>
+
                   <div className="col-span-1">
                     <span className={getStatusBadge(caseItem.status)}>
                       {caseItem.status || "-"}
                     </span>
                   </div>
-                  <div className="col-span-1 text-slate-600 text-xs">
+
+                  <div className="col-span-1 text-xs text-slate-600">
                     {formatDate(caseItem.allocation_date)}
                   </div>
-                  <div className="col-span-2 text-xs text-slate-600">
+
+                  {/* Inst. Amt (not provided by backend yet) */}
+                  <div className="col-span-1 text-xs text-slate-600">
+                    {caseItem.insl_amt || "-"}
+                  </div>
+
+                  {/* POS (not provided by backend yet) */}
+                  <div className="col-span-1 text-xs text-slate-600">
+                    {caseItem.pos || "-"}
+                  </div>
+
+                  <div className="col-span-1 text-xs text-slate-600">
                     {caseItem.follow_up_date
-                      ? `${formatDate(caseItem.follow_up_date)} ${formatTime(caseItem.follow_up_time)}`
+                      ? `${formatDate(
+                          caseItem.follow_up_date
+                        )} ${formatTime(caseItem.follow_up_time)}`
                       : "-"}
                   </div>
+
                   <div className="col-span-1 flex justify-end">
                     <button
                       onClick={(e) => {
@@ -166,7 +186,7 @@ const AgentDashboard = () => {
                         setSelectedCaseId(caseItem.case_id);
                         setDrawerOpen(true);
                       }}
-                      className="text-indigo-600 hover:text-indigo-700 font-medium text-sm group-hover:opacity-100 opacity-0 transition"
+                      className="text-indigo-600 hover:text-indigo-700 font-medium text-sm"
                     >
                       View
                     </button>
@@ -174,14 +194,14 @@ const AgentDashboard = () => {
                 </button>
 
                 {/* Expanded Row */}
-                {expandedRowId === caseItem.id && (
-                  <div className="col-span-full px-4 py-4 bg-slate-50 border-b border-slate-100">
+                {expandedRowId === caseItem.case_id && (
+                  <div className="px-4 py-4 bg-slate-50 border-b border-slate-100">
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
                       <div>
                         <p className="text-slate-500 text-xs mb-1">
                           Data Allocation Date
                         </p>
-                        <p className="font-medium text-slate-900">
+                        <p className="font-medium">
                           {formatDate(caseItem.allocation_date)}
                         </p>
                       </div>
@@ -189,7 +209,7 @@ const AgentDashboard = () => {
                         <p className="text-slate-500 text-xs mb-1">
                           First Call Date
                         </p>
-                        <p className="font-medium text-slate-900">
+                        <p className="font-medium">
                           {formatDate(caseItem.first_call_at)}
                         </p>
                       </div>
@@ -197,7 +217,7 @@ const AgentDashboard = () => {
                         <p className="text-slate-500 text-xs mb-1">
                           Last Call Date
                         </p>
-                        <p className="font-medium text-slate-900">
+                        <p className="font-medium">
                           {formatDate(caseItem.last_call_at)}
                         </p>
                       </div>
@@ -205,7 +225,7 @@ const AgentDashboard = () => {
                         <p className="text-slate-500 text-xs mb-1">
                           Follow-up Date
                         </p>
-                        <p className="font-medium text-slate-900">
+                        <p className="font-medium">
                           {formatDate(caseItem.follow_up_date)}
                         </p>
                       </div>
@@ -213,7 +233,7 @@ const AgentDashboard = () => {
                         <p className="text-slate-500 text-xs mb-1">
                           Follow-up Time
                         </p>
-                        <p className="font-medium text-slate-900">
+                        <p className="font-medium">
                           {formatTime(caseItem.follow_up_time)}
                         </p>
                       </div>
@@ -234,13 +254,10 @@ const AgentDashboard = () => {
           setSelectedCaseId(null);
         }}
         onDispositionSubmitted={(nextAssigned) => {
-          // Reload cases after disposition is submitted
           setExpandedRowId(null);
-          // reload list
-          if (typeof window.__reloadAgentCases === 'function') {
+          if (typeof window.__reloadAgentCases === "function") {
             window.__reloadAgentCases();
           }
-          // if server assigned a next record, open it
           if (nextAssigned) {
             setDrawerOpen(false);
             setSelectedCaseId(null);
@@ -249,7 +266,6 @@ const AgentDashboard = () => {
               setDrawerOpen(true);
             }, 250);
           } else {
-            // close current drawer after submit
             setDrawerOpen(false);
             setSelectedCaseId(null);
           }
