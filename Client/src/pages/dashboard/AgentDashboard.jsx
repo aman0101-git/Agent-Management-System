@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
-import { fetchAgentCases } from "@/api/agentApi";
+import { fetchAgentCases, fetchNextCase } from "@/api/agentApi";
 import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
 
 const AgentDashboard = () => {
@@ -20,8 +20,28 @@ const AgentDashboard = () => {
     const loadCases = async () => {
       try {
         const res = await fetchAgentCases(token);
-        setCases(res.data || []);
-        setFilteredCases(res.data || []);
+        const data = res.data || [];
+        setCases(data);
+        setFilteredCases(data);
+
+        // If agent has no assigned cases, try to fetch/assign next queued case automatically
+        if (!data.length) {
+          try {
+            const nextRes = await fetchNextCase(token);
+            if (nextRes.status === 200 && nextRes.data && nextRes.data.caseId) {
+              // Reload cases to include newly assigned case
+              const r2 = await fetchAgentCases(token);
+              const newData = r2.data || [];
+              setCases(newData);
+              setFilteredCases(newData);
+              // open the newly assigned case in drawer
+              setSelectedCaseId(nextRes.data.caseId);
+              setDrawerOpen(true);
+            }
+          } catch (e) {
+            console.debug("No next case allocated or error", e);
+          }
+        }
       } finally {
         setLoading(false);
       }

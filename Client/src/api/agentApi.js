@@ -40,6 +40,16 @@ export const submitDisposition = async (caseId, payload, token) => {
   return res.data;
 };
 
+// Allocate and fetch a single next queued case for the agent
+export const fetchNextCase = async (token) => {
+  const res = await axios.get(`${API_BASE}/cases/next`, {
+    headers: { Authorization: `Bearer ${token}` },
+    validateStatus: (s) => s >= 200 && s < 500,
+  });
+
+  return res;
+};
+
 // Kept for backward compatibility
 export const fetchAgentLoans = fetchAgentCases;
 export const fetchCustomerDetails = fetchCaseDetails;

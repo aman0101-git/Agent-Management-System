@@ -102,7 +102,7 @@ const CustomerDetailDrawer = ({
     try {
       setSubmitting(true);
 
-      await submitDisposition(
+      const res = await submitDisposition(
         caseId,
         {
           disposition: selectedDisposition,
@@ -119,7 +119,7 @@ const CustomerDetailDrawer = ({
       );
 
       await loadCaseDetails();
-      onDispositionSubmitted?.();
+      onDispositionSubmitted?.(res.nextAssigned || null);
     } catch {
       alert("Failed to submit disposition");
     } finally {
