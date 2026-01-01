@@ -6,6 +6,7 @@ import {
   getAgentCases,
   getAgentCaseById,
   submitDisposition,
+  getNextCase,
 } from '../controllers/agentController.js';
 
 const router = express.Router();
@@ -18,6 +19,16 @@ router.get(
   protect,
   allowRoles('AGENT'),
   getAgentCases
+);
+
+/**
+ * Allocate next queued case to agent (MUST be before /cases/:caseId to avoid route conflict)
+ */
+router.get(
+  '/cases/next',
+  protect,
+  allowRoles('AGENT'),
+  getNextCase
 );
 
 /**

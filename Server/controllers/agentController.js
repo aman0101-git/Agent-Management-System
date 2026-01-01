@@ -164,13 +164,13 @@ export const submitDisposition = async (req, res) => {
 
     await conn.beginTransaction();
 
-    // 1. Lock coll_data
+    // 1. Lock coll_data row by id (allow claiming even if coll_data.agent_id is NULL)
     const [[collData]] = await conn.query(
-      `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
+      `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id, agent_id
        FROM coll_data
-       WHERE id = ? AND agent_id = ? AND is_active = TRUE
+       WHERE id = ? AND is_active = TRUE
        FOR UPDATE`,
-      [caseId, agentId]
+      [caseId]
     );
 
     if (!collData) {
@@ -178,24 +178,34 @@ export const submitDisposition = async (req, res) => {
       return res.status(404).json({ message: "Case not found" });
     }
 
-    // 2. Ensure agent_cases
+    // 2. Lock/check agent_cases for this coll_data
     const [[existingCase]] = await conn.query(
-      `SELECT id FROM agent_cases WHERE coll_data_id = ?`,
+      `SELECT id, agent_id FROM agent_cases WHERE coll_data_id = ? FOR UPDATE`,
       [caseId]
     );
 
+    // If an agent_case exists and belongs to another agent, reject
+    if (existingCase && existingCase.agent_id !== agentId) {
+      await conn.rollback();
+      return res.status(403).json({ message: "Case already assigned to another agent" });
+    }
+
     let agentCaseId;
     if (!existingCase) {
+      // If coll_data.agent_id is null, claim it for this agent
+      if (!collData.agent_id) {
+        await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, caseId]);
+      }
+
       const [result] = await conn.query(
         `INSERT INTO agent_cases
-        (agent_id, coll_data_id, customer_name, phone, loan_id, status, allocation_date)
-        VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+        (agent_id, coll_data_id, customer_name, phone, status, allocation_date)
+        VALUES (?, ?, ?, ?, ?, NOW())`,
         [
           agentId,
           caseId,
           collData.cust_name,
           collData.mobileno,
-          collData.loan_agreement_no,
           'NEW',
         ]
       );
@@ -231,14 +241,147 @@ export const submitDisposition = async (req, res) => {
       ]
     );
 
+    // 5. Try to allocate next queued coll_data to this agent (same campaign preferred)
+    let nextAssigned = null;
+
+    // Get campaigns mapped to this agent
+    const [campaignRows] = await conn.query(
+      `SELECT campaign_id FROM campaign_agents WHERE agent_id = ?`,
+      [agentId]
+    );
+
+    const campaignIds = campaignRows.map((r) => r.campaign_id);
+
+    if (campaignIds.length) {
+      // Try to pick next from same campaign as current collData
+      const [[nextSame]] = await conn.query(
+        `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
+         FROM coll_data
+         WHERE agent_id IS NULL AND is_active = TRUE AND campaign_id = ?
+         ORDER BY created_at ASC
+         LIMIT 1
+         FOR UPDATE`,
+        [collData.campaign_id]
+      );
+
+      let nextRow = nextSame;
+
+      if (!nextRow) {
+        // pick from any campaign assigned to agent
+        const placeholders = campaignIds.map(() => "?").join(",");
+        const [rowsAny] = await conn.query(
+          `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
+           FROM coll_data
+           WHERE agent_id IS NULL AND is_active = TRUE AND campaign_id IN (${placeholders})
+           ORDER BY created_at ASC
+           LIMIT 1
+           FOR UPDATE`,
+          campaignIds
+        );
+        nextRow = rowsAny[0];
+      }
+
+      if (nextRow) {
+        await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, nextRow.id]);
+        await conn.query(
+          `INSERT INTO agent_cases (agent_id, coll_data_id, customer_name, phone, status, allocation_date)
+           VALUES (?, ?, ?, ?, ?, NOW())`,
+          [agentId, nextRow.id, nextRow.cust_name, nextRow.mobileno, 'NEW']
+        );
+
+        // update last_assigned_at for the campaign-agent mapping
+        await conn.query(
+          `UPDATE campaign_agents SET last_assigned_at = NOW() WHERE campaign_id = ? AND agent_id = ?`,
+          [nextRow.campaign_id, agentId]
+        );
+
+        nextAssigned = nextRow.id;
+      }
+    }
+
     await conn.commit();
 
-    return res.json({ message: "Disposition saved", status: "DONE" });
+    return res.json({ message: "Disposition saved", status: "DONE", nextAssigned });
   } catch (err) {
     await conn.rollback();
     console.error(err);
     return res.status(500).json({ message: "Failed to submit disposition" });
   } finally {
     conn.release();
+  }
+};
+
+
+/**
+ * GET /api/agent/cases/next
+ * Allocate and fetch a single next queued case for the agent
+ */
+export const getNextCase = async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const agentId = req.user.id;
+    await conn.beginTransaction();
+
+    // 1. Get campaigns assigned to agent
+    const [campaignRows] = await conn.query(
+      `SELECT campaign_id FROM campaign_agents WHERE agent_id = ?`,
+      [agentId]
+    );
+
+    const campaignIds = campaignRows.map((r) => r.campaign_id);
+    if (!campaignIds.length) {
+      await conn.commit();
+      return res.status(400).json({ message: "Agent not assigned to any campaigns. Contact admin to assign campaigns." });
+    }
+
+    // 2. Try to pick oldest unassigned record across agent's campaigns
+    const placeholders = campaignIds.map(() => "?").join(",");
+    const [rows] = await conn.query(
+      `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
+       FROM coll_data
+       WHERE agent_id IS NULL AND is_active = TRUE AND campaign_id IN (${placeholders})
+       ORDER BY created_at ASC
+       LIMIT 1
+       FOR UPDATE`,
+      campaignIds
+    );
+
+    const next = rows[0];
+    if (!next) {
+      await conn.commit();
+      return res.status(204).json({ message: "No unassigned customers in queue" });
+    }
+
+    // 3. Assign to agent and create agent_cases
+    await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, next.id]);
+    
+    await conn.query(
+      `INSERT INTO agent_cases (agent_id, coll_data_id, customer_name, phone, status, allocation_date)
+       VALUES (?, ?, ?, ?, ?, NOW())`,
+      [agentId, next.id, next.cust_name, next.mobileno, 'NEW']
+    );
+
+    // 4. update last_assigned_at
+    await conn.query(
+      `UPDATE campaign_agents SET last_assigned_at = NOW() WHERE campaign_id = ? AND agent_id = ?`,
+      [next.campaign_id, agentId]
+    );
+
+    await conn.commit();
+
+    // return simple case payload
+    return res.json({ caseId: next.id, customer_name: next.cust_name, phone: next.mobileno, loan_id: next.loan_agreement_no });
+  } catch (err) {
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr) {
+        console.error("Rollback error:", rollbackErr);
+      }
+    }
+    console.error("getNextCase error:", err);
+    return res.status(500).json({ message: "Failed to fetch next case", error: err.message });
+  } finally {
+    if (conn) conn.release();
   }
 };

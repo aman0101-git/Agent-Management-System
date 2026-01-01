@@ -147,41 +147,25 @@ export const ingestLoans = async (req, res) => {
         else extraFields[key] = value;
       }
 
-      // Pick least-recently-assigned agent
-      const [[agent]] = await conn.query(
-        `
-        SELECT id, agent_id
-        FROM campaign_agents
-        WHERE campaign_id = ?
-        ORDER BY
-          last_assigned_at IS NOT NULL,
-          last_assigned_at ASC,
-          id ASC
-        LIMIT 1
-        `,
-        [campaign_id]
-      );
-
-      // Insert coll_data
+      // Insert coll_data without assigning to any agent.
+      // Keep records queued in coll_data; assignment happens when an agent requests the next case.
       await conn.query(
         `
         INSERT INTO coll_data (
           ${Object.keys(fixedData).join(", ")},
           campaign_id,
-          agent_id,
           batch_month,
           batch_year,
           extra_fields,
           is_active
         ) VALUES (
           ${Object.keys(fixedData).map(() => "?").join(", ")},
-          ?, ?, ?, ?, ?, 1
+          ?, ?, ?, ?, 1
         )
         `,
         [
           ...Object.values(fixedData),
           campaign_id,
-          agent.agent_id,
           month,
           year,
           Object.keys(extraFields).length
@@ -189,19 +173,13 @@ export const ingestLoans = async (req, res) => {
             : null,
         ]
       );
-
-      // Update round-robin pointer
-      await conn.query(
-        `UPDATE campaign_agents SET last_assigned_at = NOW() WHERE id = ?`,
-        [agent.id]
-      );
     }
 
     await conn.commit();
     conn.release();
 
     res.status(201).json({
-      message: "Data ingested and assigned fairly to agents",
+      message: "Data ingested and queued for assignment to agents",
     });
   } catch (err) {
     if (conn) {
