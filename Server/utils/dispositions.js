@@ -25,7 +25,7 @@ export const DISPOSITIONS = {
     code: 'PRT',
     name: 'Part Payment',
     description: 'Customer made a partial payment',
-    requiresFollowUp: false,
+    requiresFollowUp: true,
   },
   SIF: {
     code: 'SIF',
@@ -43,7 +43,7 @@ export const DISPOSITIONS = {
     code: 'FCL',
     name: 'Foreclosure',
     description: 'Loan foreclosure initiated',
-    requiresFollowUp: false,
+    requiresFollowUp: true,
   },
   CBC: {
     code: 'CBC',

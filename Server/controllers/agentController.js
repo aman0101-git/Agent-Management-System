@@ -154,9 +154,9 @@ export const submitDisposition = async (req, res) => {
     const { disposition, remarks, promiseAmount, followUpDate, followUpTime, isEdit } = req.body;
 
     // Status mapping by disposition type
-    const FOLLOW_UP = ['PTP','BRP','PRT','FCL','CBC'];
+    const FOLLOW_UP = ['PTP','BRP','PRT','CBC'];
     const IN_PROGRESS = ['RTP','TPC','LNB','VOI','RNR','SOW','OOS','WRN'];
-    const DONE = ['SIF','PIF'];
+    const DONE = ['SIF','PIF','FCL'];
 
     if (!disposition)
       return res.status(400).json({ message: "Disposition required" });
@@ -164,17 +164,25 @@ export const submitDisposition = async (req, res) => {
     await conn.beginTransaction();
 
     // 1️⃣ Verify agent case exists and belongs to agent
+    // ✅ Works for BOTH edit & normal submit
     const [[agentCase]] = await conn.query(
-      `SELECT id, status, coll_data_id FROM agent_cases
-       WHERE agent_id = ? AND is_active = 1
-       FOR UPDATE`,
-      [agentId]
+      `
+      SELECT id, status
+      FROM agent_cases
+      WHERE coll_data_id = ?
+        AND agent_id = ?
+      ORDER BY id DESC
+      LIMIT 1
+      FOR UPDATE
+      `,
+      [caseId, agentId]
     );
 
-    if (!agentCase || agentCase.coll_data_id !== Number(caseId)) {
+    if (!agentCase) {
       await conn.rollback();
-      return res.status(404).json({ message: "Active case not found" });
+      return res.status(404).json({ message: "Agent case not found" });
     }
+
 
     // 2️⃣ Determine new status based on disposition
     let newStatus = agentCase.status;
