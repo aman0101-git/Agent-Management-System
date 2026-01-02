@@ -48,6 +48,7 @@ const CustomerDetailDrawer = ({
   const [followUpTime, setFollowUpTime] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [editingAgentCaseId, setEditingAgentCaseId] = useState(null);
 
   useEffect(() => {
     if (isOpen && caseId) {
@@ -119,6 +120,7 @@ const CustomerDetailDrawer = ({
             ? followUpTime
             : null,
           isEdit: isEditing,
+          agentCaseId: editingAgentCaseId,
         },
         token
       );
@@ -154,6 +156,7 @@ const CustomerDetailDrawer = ({
     setFollowUpTime(disposition.follow_up_time || "");
     setRemarks(disposition.remarks || "");
     setIsEditing(true);
+    setEditingAgentCaseId(disposition.agent_case_id);
   };
 
   if (!isOpen) return null;
@@ -232,76 +235,113 @@ const CustomerDetailDrawer = ({
                 {dispositions.length > 0 && (
                   <Section title="Disposition History">
                     <div className="col-span-full space-y-3">
-                      {dispositions.map((d, i) => (
-                        <div key={i} className="p-3 border rounded space-y-1 bg-slate-50">
-                          <div className="flex justify-between items-start">
-                            <div>
-                              <strong className="text-slate-900">{d.disposition}</strong>
-                              <p className="text-xs text-slate-500 mt-1">
-                                {new Date(d.created_at).toLocaleString("en-IN")}
-                              </p>
+
+                      {/* 🔹 LATEST DISPOSITION */}
+                      {(() => {
+                        const latest = dispositions[0];
+
+                        return (
+                          <div className="p-4 border rounded bg-white space-y-1">
+                            <div className="flex justify-between items-start">
+                              <div>
+                                <strong className="text-slate-900">
+                                  {latest.disposition}
+                                </strong>
+                                <p className="text-xs text-slate-500 mt-1">
+                                  {new Date(latest.created_at).toLocaleString("en-IN")}
+                                </p>
+                              </div>
+                              <button
+                                type="button"
+                                className="text-xs text-indigo-600 hover:underline font-medium"
+                                onClick={() => handleEditDisposition(latest)}
+                              >
+                                Edit
+                              </button>
                             </div>
-                            <button
-                              type="button"
-                              className="text-xs text-indigo-600 hover:underline cursor-pointer font-medium"
-                              onClick={() => handleEditDisposition(d)}
-                            >
-                              Edit
-                            </button>
+
+                            {latest.remarks && (
+                              <p className="text-sm">{latest.remarks}</p>
+                            )}
+
+                            {latest.promise_amount && (
+                              <p className="text-sm">
+                                Amount:{" "}
+                                <strong>
+                                  ₹{parseFloat(latest.promise_amount).toFixed(2)}
+                                </strong>
+                              </p>
+                            )}
+
+                            {latest.follow_up_date && (
+                              <p className="text-sm">
+                                Follow-up: {latest.follow_up_date} at{" "}
+                                {latest.follow_up_time || "N/A"}
+                              </p>
+                            )}
                           </div>
+                        );
+                      })()}
 
-                          {d.remarks && <p className="text-sm">{d.remarks}</p>}
+                      {/* 🔹 PREVIOUS EDITS TOGGLE */}
+                      {dispositions.length > 1 && (
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => setShowEditHistory(!showEditHistory)}
+                            className="text-sm font-medium text-indigo-700 hover:underline"
+                          >
+                            {showEditHistory
+                              ? "Hide previous edits"
+                              : `View previous edits (${dispositions.length - 1})`}
+                          </button>
 
-                          {d.promise_amount && (
-                            <p className="text-sm text-slate-700">
-                              Amount: <strong>₹{parseFloat(d.promise_amount).toFixed(2)}</strong>
-                            </p>
+                          {showEditHistory && (
+                            <div className="space-y-2 pt-2">
+                              {dispositions.slice(1).map((d, i) => (
+                                <div
+                                  key={i}
+                                  className="p-3 border rounded bg-slate-50 text-sm space-y-1"
+                                >
+                                  <p className="text-xs text-slate-500">
+                                    {new Date(d.created_at).toLocaleString("en-IN")}
+                                  </p>
+
+                                  <p>
+                                    <span className="font-medium">Disposition:</span>{" "}
+                                    {d.disposition}
+                                  </p>
+
+                                  {d.remarks && (
+                                    <p>
+                                      <span className="font-medium">Remarks:</span>{" "}
+                                      {d.remarks}
+                                    </p>
+                                  )}
+
+                                  {d.promise_amount && (
+                                    <p>
+                                      <span className="font-medium">Amount:</span>{" "}
+                                      ₹{parseFloat(d.promise_amount).toFixed(2)}
+                                    </p>
+                                  )}
+
+                                  {d.follow_up_date && (
+                                    <p>
+                                      <span className="font-medium">Follow-up:</span>{" "}
+                                      {d.follow_up_date} at {d.follow_up_time}
+                                    </p>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
                           )}
-
-                          {d.follow_up_date && (
-                            <p className="text-sm text-slate-700">
-                              Follow-up: {d.follow_up_date} at {d.follow_up_time || "N/A"}
-                            </p>
-                          )}
-                        </div>
-                      ))}
+                        </>
+                      )}
                     </div>
                   </Section>
                 )}
 
-                {/* LATEST EDIT PREVIEW */}
-                {editHistory.length > 0 && (
-                  <div className="border rounded p-4 bg-amber-50">
-                    <h4 className="font-semibold text-sm text-slate-900 mb-3">Latest Edit</h4>
-                    {(() => {
-                      const latestEdit = editHistory[editHistory.length - 1];
-                      return (
-                        <div className="p-3 bg-white border rounded text-sm space-y-1">
-                          <p className="text-xs text-slate-500 mb-2">
-                            {new Date(latestEdit.edited_at).toLocaleString("en-IN")}
-                          </p>
-                          <p><span className="font-medium">Disposition:</span> {latestEdit.disposition}</p>
-                          {latestEdit.remarks && <p><span className="font-medium">Remarks:</span> {latestEdit.remarks}</p>}
-                          {latestEdit.promise_amount && (
-                            <p><span className="font-medium">Amount:</span> ₹{parseFloat(latestEdit.promise_amount).toFixed(2)}</p>
-                          )}
-                          {latestEdit.follow_up_date && (
-                            <p><span className="font-medium">Follow-up:</span> {latestEdit.follow_up_date} at {latestEdit.follow_up_time}</p>
-                          )}
-                        </div>
-                      );
-                    })()}
-                    {editHistory.length > 1 && (
-                      <button
-                        type="button"
-                        onClick={() => setShowEditHistoryModal(true)}
-                        className="mt-3 text-sm font-medium text-amber-700 hover:text-amber-900 underline"
-                      >
-                        View Previous Edits ({editHistory.length - 1})
-                      </button>
-                    )}
-                  </div>
-                )}
 
                 {/* SUBMIT DISPOSITION */}
                 {caseData.status !== "DONE" && (
