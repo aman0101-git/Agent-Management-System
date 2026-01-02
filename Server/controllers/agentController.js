@@ -42,7 +42,7 @@ export const getAgentCases = async (req, res) => {
 
 /**
  * GET /api/agent/cases/:caseId
- * Fetch single case + disposition history from Coll_Data
+ * Fetch single case + disposition history + edit history
  */
 export const getAgentCaseById = async (req, res) => {
   try {
@@ -104,9 +104,10 @@ export const getAgentCaseById = async (req, res) => {
       return res.status(404).json({ message: "Case not found" });
     }
 
+    // Get current dispositions
     const [dispositions] = await pool.query(
       `
-      SELECT disposition, remarks, promise_amount, created_at
+      SELECT id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, created_at
       FROM agent_dispositions
       WHERE agent_case_id = (
         SELECT id FROM agent_cases WHERE coll_data_id = ?
@@ -116,9 +117,23 @@ export const getAgentCaseById = async (req, res) => {
       [caseId]
     );
 
+    // Get edit history
+    const [editHistory] = await pool.query(
+      `
+      SELECT id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, edited_at
+      FROM agent_dispositions_edit_history
+      WHERE agent_case_id = (
+        SELECT id FROM agent_cases WHERE coll_data_id = ?
+      )
+      ORDER BY edited_at DESC
+      `,
+      [caseId]
+    );
+
     return res.json({
       case: row,
       dispositions: dispositions || [],
+      editHistory: editHistory || [],
     });
   } catch (err) {
     console.error("getAgentCaseById error:", err);
@@ -129,188 +144,127 @@ export const getAgentCaseById = async (req, res) => {
 
 /**
  * POST /api/agent/cases/:caseId/disposition
- * Submit disposition - creates agent_cases record if needed
+ * Submit or edit disposition with automatic status tracking
  */
 export const submitDisposition = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const agentId = req.user.id;
     const { caseId } = req.params;
+    const { disposition, remarks, promiseAmount, followUpDate, followUpTime, isEdit } = req.body;
 
-    const {
-      disposition,
-      remarks,
-      promiseAmount,
-      followUpDate,
-      followUpTime,
-    } = req.body;
+    // Status mapping by disposition type
+    const FOLLOW_UP = ['PTP','BRP','PRT','FCL','CBC'];
+    const IN_PROGRESS = ['RTP','TPC','LNB','VOI','RNR','SOW','OOS','WRN'];
+    const DONE = ['SIF','PIF'];
 
-    const FOLLOWUP_REQUIRED = ['PTP', 'CBC', 'BRP'];
-
-    // 🔒 HARD VALIDATIONS
     if (!disposition)
       return res.status(400).json({ message: "Disposition required" });
 
-    if (promiseAmount === undefined || promiseAmount === null)
-      return res.status(400).json({ message: "Promise amount required" });
-
-    if (FOLLOWUP_REQUIRED.includes(disposition)) {
-      if (!followUpDate || !followUpTime) {
-        return res.status(400).json({
-          message: "Follow-up date and time required",
-        });
-      }
-    }
-
     await conn.beginTransaction();
 
-    // 1. Lock coll_data row by id (allow claiming even if coll_data.agent_id is NULL)
-    const [[collData]] = await conn.query(
-      `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id, agent_id
-       FROM coll_data
-       WHERE id = ? AND is_active = TRUE
+    // 1️⃣ Verify agent case exists and belongs to agent
+    const [[agentCase]] = await conn.query(
+      `SELECT id, status, coll_data_id FROM agent_cases
+       WHERE agent_id = ? AND is_active = 1
        FOR UPDATE`,
-      [caseId]
-    );
-
-    if (!collData) {
-      await conn.rollback();
-      return res.status(404).json({ message: "Case not found" });
-    }
-
-    // 2. Lock/check agent_cases for this coll_data
-    const [[existingCase]] = await conn.query(
-      `SELECT id, agent_id FROM agent_cases WHERE coll_data_id = ? FOR UPDATE`,
-      [caseId]
-    );
-
-    // If an agent_case exists and belongs to another agent, reject
-    if (existingCase && existingCase.agent_id !== agentId) {
-      await conn.rollback();
-      return res.status(403).json({ message: "Case already assigned to another agent" });
-    }
-
-    let agentCaseId;
-    if (!existingCase) {
-      // If coll_data.agent_id is null, claim it for this agent
-      if (!collData.agent_id) {
-        await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, caseId]);
-      }
-
-      const [result] = await conn.query(
-        `INSERT INTO agent_cases
-        (agent_id, coll_data_id, customer_name, phone, status, allocation_date)
-        VALUES (?, ?, ?, ?, ?, NOW())`,
-        [
-          agentId,
-          caseId,
-          collData.cust_name,
-          collData.mobileno,
-          'NEW',
-        ]
-      );
-      agentCaseId = result.insertId;
-    } else {
-      agentCaseId = existingCase.id;
-    }
-
-    // 3. SAVE DISPOSITION + AMOUNT
-    const safeRemarks = remarks?.trim() || null;
-
-    await conn.query(
-      `INSERT INTO agent_dispositions
-      (agent_case_id, disposition, remarks, promise_amount)
-      VALUES (?, ?, ?, ?)`,
-      [agentCaseId, disposition, safeRemarks, promiseAmount]
-    );
-
-    // 4. UPDATE STATUS
-    await conn.query(
-      `UPDATE agent_cases
-       SET
-         status = 'DONE',
-         first_call_at = COALESCE(first_call_at, NOW()),
-         last_call_at = NOW(),
-         follow_up_date = ?,
-         follow_up_time = ?
-       WHERE id = ?`,
-      [
-        FOLLOWUP_REQUIRED.includes(disposition) ? followUpDate : null,
-        FOLLOWUP_REQUIRED.includes(disposition) ? followUpTime : null,
-        agentCaseId,
-      ]
-    );
-
-    // 5. Try to allocate next queued coll_data to this agent (same campaign preferred)
-    let nextAssigned = null;
-
-    // Get campaigns mapped to this agent
-    const [campaignRows] = await conn.query(
-      `SELECT campaign_id FROM campaign_agents WHERE agent_id = ?`,
       [agentId]
     );
 
-    const campaignIds = campaignRows.map((r) => r.campaign_id);
+    if (!agentCase || agentCase.coll_data_id !== Number(caseId)) {
+      await conn.rollback();
+      return res.status(404).json({ message: "Active case not found" });
+    }
 
-    if (campaignIds.length) {
-      // Try to pick next from same campaign as current collData
-      const [[nextSame]] = await conn.query(
-        `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
-         FROM coll_data
-         WHERE agent_id IS NULL AND is_active = TRUE AND campaign_id = ?
-         ORDER BY created_at ASC
-         LIMIT 1
-         FOR UPDATE`,
-        [collData.campaign_id]
+    // 2️⃣ Determine new status based on disposition
+    let newStatus = agentCase.status;
+    if (FOLLOW_UP.includes(disposition)) newStatus = 'FOLLOW_UP';
+    else if (IN_PROGRESS.includes(disposition)) newStatus = 'IN_PROGRESS';
+    else if (DONE.includes(disposition)) newStatus = 'DONE';
+
+    const statusChanged = newStatus !== agentCase.status;
+
+    // 3️⃣ If editing, save old disposition to edit history
+    if (isEdit) {
+      const [[lastDisposition]] = await conn.query(
+        `SELECT * FROM agent_dispositions 
+         WHERE agent_case_id = ? 
+         ORDER BY created_at DESC 
+         LIMIT 1`,
+        [agentCase.id]
       );
 
-      let nextRow = nextSame;
-
-      if (!nextRow) {
-        // pick from any campaign assigned to agent
-        const placeholders = campaignIds.map(() => "?").join(",");
-        const [rowsAny] = await conn.query(
-          `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
-           FROM coll_data
-           WHERE agent_id IS NULL AND is_active = TRUE AND campaign_id IN (${placeholders})
-           ORDER BY created_at ASC
-           LIMIT 1
-           FOR UPDATE`,
-          campaignIds
+      if (lastDisposition) {
+        await conn.query(
+          `INSERT INTO agent_dispositions_edit_history 
+           (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, edited_at)
+           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
+          [agentCase.id, lastDisposition.disposition, lastDisposition.remarks, 
+           lastDisposition.promise_amount, lastDisposition.follow_up_date, lastDisposition.follow_up_time]
         );
-        nextRow = rowsAny[0];
       }
 
-      if (nextRow) {
-        await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, nextRow.id]);
-        await conn.query(
-          `INSERT INTO agent_cases (agent_id, coll_data_id, customer_name, phone, status, allocation_date)
-           VALUES (?, ?, ?, ?, ?, NOW())`,
-          [agentId, nextRow.id, nextRow.cust_name, nextRow.mobileno, 'NEW']
-        );
+      // Delete old disposition and insert new one
+      await conn.query(
+        `DELETE FROM agent_dispositions WHERE agent_case_id = ? ORDER BY created_at DESC LIMIT 1`,
+        [agentCase.id]
+      );
+    }
 
-        // update last_assigned_at for the campaign-agent mapping
-        await conn.query(
-          `UPDATE campaign_agents SET last_assigned_at = NOW() WHERE campaign_id = ? AND agent_id = ?`,
-          [nextRow.campaign_id, agentId]
-        );
+    // 4️⃣ Insert or update disposition
+    await conn.query(
+      `INSERT INTO agent_dispositions
+       (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+      [
+        agentCase.id,
+        disposition,
+        remarks || null,
+        (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? promiseAmount : null,
+        (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpDate : null,
+        (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpTime : null,
+      ]
+    );
 
-        nextAssigned = nextRow.id;
-      }
+    // 5️⃣ Update case status only if it changed
+    if (statusChanged) {
+      await conn.query(
+        `UPDATE agent_cases
+         SET
+           status = ?,
+           is_active = 0,
+           last_call_at = NOW(),
+           follow_up_date = ?,
+           follow_up_time = ?
+         WHERE id = ?`,
+        [
+          newStatus,
+          (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpDate : null,
+          (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpTime : null,
+          agentCase.id,
+        ]
+      );
     }
 
     await conn.commit();
 
-    return res.json({ message: "Disposition saved", status: "DONE", nextAssigned });
+    // Only allocate next if status changes to DONE (not for FOLLOW_UP or IN_PROGRESS)
+    const shouldAllocateNext = statusChanged;
+
+    return res.json({
+      message: "Disposition saved successfully",
+      status: newStatus,
+      allocateNext: shouldAllocateNext
+    });
+
   } catch (err) {
     await conn.rollback();
-    console.error(err);
+    console.error("submitDisposition error:", err);
     return res.status(500).json({ message: "Failed to submit disposition" });
   } finally {
     conn.release();
   }
 };
-
 
 /**
  * GET /api/agent/cases/next
@@ -322,66 +276,55 @@ export const getNextCase = async (req, res) => {
     const agentId = req.user.id;
     await conn.beginTransaction();
 
-    // 1. Get campaigns assigned to agent
-    const [campaignRows] = await conn.query(
-      `SELECT campaign_id FROM campaign_agents WHERE agent_id = ?`,
+    // 1️⃣ Block if agent already has active case
+    const [[active]] = await conn.query(
+      `SELECT id FROM agent_cases WHERE agent_id = ? AND is_active = 1`,
       [agentId]
     );
 
-    const campaignIds = campaignRows.map((r) => r.campaign_id);
-    if (!campaignIds.length) {
+    if (active) {
       await conn.commit();
-      return res.status(400).json({ message: "Agent not assigned to any campaigns. Contact admin to assign campaigns." });
+      return res.status(409).json({ message: "Agent already has an active case" });
     }
 
-    // 2. Try to pick oldest unassigned record across agent's campaigns
-    const placeholders = campaignIds.map(() => "?").join(",");
-    const [rows] = await conn.query(
-      `SELECT id, cust_name, mobileno, loan_agreement_no, campaign_id
+    // 2️⃣ Fetch next unassigned customer
+    const [[next]] = await conn.query(
+      `SELECT id, cust_name, mobileno, loan_agreement_no
        FROM coll_data
-       WHERE agent_id IS NULL AND is_active = TRUE AND campaign_id IN (${placeholders})
+       WHERE agent_id IS NULL AND is_active = 1
        ORDER BY created_at ASC
        LIMIT 1
-       FOR UPDATE`,
-      campaignIds
+       FOR UPDATE`
     );
 
-    const next = rows[0];
     if (!next) {
       await conn.commit();
-      return res.status(204).json({ message: "No unassigned customers in queue" });
+      return res.status(204).json({ message: "No customers available" });
     }
 
-    // 3. Assign to agent and create agent_cases
+    // 3️⃣ Assign & create agent_case
     await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, next.id]);
-    
-    await conn.query(
-      `INSERT INTO agent_cases (agent_id, coll_data_id, customer_name, phone, status, allocation_date)
-       VALUES (?, ?, ?, ?, ?, NOW())`,
-      [agentId, next.id, next.cust_name, next.mobileno, 'NEW']
-    );
 
-    // 4. update last_assigned_at
     await conn.query(
-      `UPDATE campaign_agents SET last_assigned_at = NOW() WHERE campaign_id = ? AND agent_id = ?`,
-      [next.campaign_id, agentId]
+      `INSERT INTO agent_cases (agent_id, coll_data_id, status, is_active)
+       VALUES (?, ?, 'NEW', 1)`,
+      [agentId, next.id]
     );
 
     await conn.commit();
 
-    // return simple case payload
-    return res.json({ caseId: next.id, customer_name: next.cust_name, phone: next.mobileno, loan_id: next.loan_agreement_no });
+    return res.json({
+      caseId: next.id,
+      customer_name: next.cust_name,
+      phone: next.mobileno,
+      loan_id: next.loan_agreement_no
+    });
+
   } catch (err) {
-    if (conn) {
-      try {
-        await conn.rollback();
-      } catch (rollbackErr) {
-        console.error("Rollback error:", rollbackErr);
-      }
-    }
+    await conn.rollback();
     console.error("getNextCase error:", err);
-    return res.status(500).json({ message: "Failed to fetch next case", error: err.message });
+    return res.status(500).json({ message: "Failed to fetch next case" });
   } finally {
-    if (conn) conn.release();
+    conn.release();
   }
 };
