@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
-import { fetchCaseDetails, submitDisposition } from "@/api/agentApi";
+import { fetchCaseDetails, submitDisposition, fetchNextCase } from "@/api/agentApi";
 import { useAuth } from "@/context/AuthContext";
-import { DISPOSITIONS, requiresFollowUp } from "@/lib/dispositions";
+import { DISPOSITIONS, requiresAmountAndDate } from "@/lib/dispositions";
 
 /* ---------- Reusable UI ---------- */
 
@@ -35,15 +35,19 @@ const CustomerDetailDrawer = ({
 
   const [caseData, setCaseData] = useState(null);
   const [dispositions, setDispositions] = useState([]);
+  const [editHistory, setEditHistory] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [showEditHistory, setShowEditHistory] = useState(false);
+  const [showEditHistoryModal, setShowEditHistoryModal] = useState(false);
 
-  // Form state (ONLY required addition)
+  // Form state
   const [selectedDisposition, setSelectedDisposition] = useState("");
   const [remarks, setRemarks] = useState("");
-  const [promiseAmount, setPromiseAmount] = useState(""); // ✅ ADDED
+  const [promiseAmount, setPromiseAmount] = useState("");
   const [followUpDate, setFollowUpDate] = useState("");
   const [followUpTime, setFollowUpTime] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   useEffect(() => {
     if (isOpen && caseId) {
@@ -65,13 +69,16 @@ const CustomerDetailDrawer = ({
 
       setCaseData(data);
       setDispositions(res.dispositions || []);
+      setEditHistory(res.editHistory || []);
+      setShowEditHistory(false);
 
-      // reset form
+      // Reset form
       setSelectedDisposition("");
       setRemarks("");
-      setPromiseAmount(""); // ✅ ADDED
+      setPromiseAmount("");
       setFollowUpDate("");
       setFollowUpTime("");
+      setIsEditing(false);
     } finally {
       setLoading(false);
     }
@@ -80,22 +87,17 @@ const CustomerDetailDrawer = ({
   const handleSubmitDisposition = async (e) => {
     e.preventDefault();
 
-    // 🔒 REQUIRED VALIDATIONS
     if (!selectedDisposition) {
       alert("Please select a disposition");
       return;
     }
 
-    if (!promiseAmount) {
-      alert("Promise amount is required");
-      return;
-    }
-
+    // Validate amount and date-time only for dispositions that require them
     if (
-      requiresFollowUp(selectedDisposition) &&
-      (!followUpDate || !followUpTime)
+      requiresAmountAndDate(selectedDisposition) &&
+      (!promiseAmount || !followUpDate || !followUpTime)
     ) {
-      alert("Follow-up date and time are required");
+      alert("Amount, follow-up date and time are required for this disposition");
       return;
     }
 
@@ -107,24 +109,51 @@ const CustomerDetailDrawer = ({
         {
           disposition: selectedDisposition,
           remarks,
-          promiseAmount, // ✅ SENT TO BACKEND
-          followUpDate: requiresFollowUp(selectedDisposition)
+          promiseAmount: requiresAmountAndDate(selectedDisposition)
+            ? promiseAmount
+            : null,
+          followUpDate: requiresAmountAndDate(selectedDisposition)
             ? followUpDate
             : null,
-          followUpTime: requiresFollowUp(selectedDisposition)
+          followUpTime: requiresAmountAndDate(selectedDisposition)
             ? followUpTime
             : null,
+          isEdit: isEditing,
         },
         token
       );
 
+      // If status changed, allocate next customer
+      if (res.allocateNext) {
+        try {
+          const nextRes = await fetchNextCase(token);
+          if (nextRes.status === 200) {
+            console.log("Next customer allocated:", nextRes.data);
+          }
+        } catch (err) {
+          console.log("No more customers available or already has active case");
+        }
+      }
+
+      // Reload case details
       await loadCaseDetails();
-      onDispositionSubmitted?.(res.nextAssigned || null);
-    } catch {
+      onDispositionSubmitted?.();
+
+    } catch (err) {
+      console.error(err);
       alert("Failed to submit disposition");
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleEditDisposition = (disposition) => {
+    setSelectedDisposition(disposition.disposition);
+    setPromiseAmount(disposition.promise_amount || "");
+    setFollowUpDate(disposition.follow_up_date ? disposition.follow_up_date.split('T')[0] : "");
+    setFollowUpTime(disposition.follow_up_time || "");
+    setRemarks(disposition.remarks || "");
+    setIsEditing(true);
   };
 
   if (!isOpen) return null;
@@ -200,50 +229,83 @@ const CustomerDetailDrawer = ({
                 </Section>
 
                 {/* DISPOSITION HISTORY */}
-                  {dispositions.length > 0 && (
-                    <Section title="Disposition History">
-                      <div className="col-span-full space-y-3">
-                        {dispositions.map((d, i) => (
-                          <div key={i} className="p-3 border rounded space-y-1">
-                            <div className="flex justify-between items-start">
-                              <strong>{d.disposition}</strong>
-
-                              {/* EDIT BUTTON */}
-                              <button
-                                type="button"
-                                className="text-xs text-indigo-600 hover:underline cursor-pointer"
-                                onClick={(e) => {
-                                  e.stopPropagation(); // CRITICAL
-                                  setSelectedDisposition(d.disposition);
-                                  setPromiseAmount(d.promise_amount || "");
-                                  setRemarks(""); // keep old remarks
-                                }}
-                              >
-                                Edit
-                              </button>
-
-                            </div>
-
-                            <p className="text-xs text-slate-500">
-                              {new Date(d.created_at).toLocaleString("en-IN")}
-                            </p>
-
-                            {d.remarks && <p>{d.remarks}</p>}
-
-                            {d.promise_amount && (
-                              <p className="text-sm text-slate-700">
-                                Promise Amount: <strong>₹{d.promise_amount}</strong>
+                {dispositions.length > 0 && (
+                  <Section title="Disposition History">
+                    <div className="col-span-full space-y-3">
+                      {dispositions.map((d, i) => (
+                        <div key={i} className="p-3 border rounded space-y-1 bg-slate-50">
+                          <div className="flex justify-between items-start">
+                            <div>
+                              <strong className="text-slate-900">{d.disposition}</strong>
+                              <p className="text-xs text-slate-500 mt-1">
+                                {new Date(d.created_at).toLocaleString("en-IN")}
                               </p>
-                            )}
+                            </div>
+                            <button
+                              type="button"
+                              className="text-xs text-indigo-600 hover:underline cursor-pointer font-medium"
+                              onClick={() => handleEditDisposition(d)}
+                            >
+                              Edit
+                            </button>
                           </div>
-                        ))}
-                      </div>
-                    </Section>
-                  )}
+
+                          {d.remarks && <p className="text-sm">{d.remarks}</p>}
+
+                          {d.promise_amount && (
+                            <p className="text-sm text-slate-700">
+                              Amount: <strong>₹{parseFloat(d.promise_amount).toFixed(2)}</strong>
+                            </p>
+                          )}
+
+                          {d.follow_up_date && (
+                            <p className="text-sm text-slate-700">
+                              Follow-up: {d.follow_up_date} at {d.follow_up_time || "N/A"}
+                            </p>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </Section>
+                )}
+
+                {/* LATEST EDIT PREVIEW */}
+                {editHistory.length > 0 && (
+                  <div className="border rounded p-4 bg-amber-50">
+                    <h4 className="font-semibold text-sm text-slate-900 mb-3">Latest Edit</h4>
+                    {(() => {
+                      const latestEdit = editHistory[editHistory.length - 1];
+                      return (
+                        <div className="p-3 bg-white border rounded text-sm space-y-1">
+                          <p className="text-xs text-slate-500 mb-2">
+                            {new Date(latestEdit.edited_at).toLocaleString("en-IN")}
+                          </p>
+                          <p><span className="font-medium">Disposition:</span> {latestEdit.disposition}</p>
+                          {latestEdit.remarks && <p><span className="font-medium">Remarks:</span> {latestEdit.remarks}</p>}
+                          {latestEdit.promise_amount && (
+                            <p><span className="font-medium">Amount:</span> ₹{parseFloat(latestEdit.promise_amount).toFixed(2)}</p>
+                          )}
+                          {latestEdit.follow_up_date && (
+                            <p><span className="font-medium">Follow-up:</span> {latestEdit.follow_up_date} at {latestEdit.follow_up_time}</p>
+                          )}
+                        </div>
+                      );
+                    })()}
+                    {editHistory.length > 1 && (
+                      <button
+                        type="button"
+                        onClick={() => setShowEditHistoryModal(true)}
+                        className="mt-3 text-sm font-medium text-amber-700 hover:text-amber-900 underline"
+                      >
+                        View Previous Edits ({editHistory.length - 1})
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* SUBMIT DISPOSITION */}
                 {caseData.status !== "DONE" && (
-                  <Section title="Submit Disposition">
+                  <Section title={isEditing ? "Edit Disposition" : "Submit Disposition"}>
                     <form
                       onSubmit={handleSubmitDisposition}
                       className="col-span-full grid grid-cols-1 md:grid-cols-2 gap-6"
@@ -267,51 +329,71 @@ const CustomerDetailDrawer = ({
                         <textarea
                           value={remarks}
                           onChange={(e) => setRemarks(e.target.value)}
-                          placeholder="Remarks"
+                          placeholder="Remarks (optional)"
                           rows={4}
                           className="w-full border rounded px-3 py-2 resize-none"
                         />
                       </div>
 
                       <div className="space-y-3 text-sm">
-                        <input
-                          type="number"
-                          placeholder="Promise / Amount"
-                          value={promiseAmount}
-                          onChange={(e) =>
-                            setPromiseAmount(e.target.value)
-                          }
-                          className="w-full border rounded px-3 py-2"
-                        />
+                        {/* CONDITIONALLY SHOW AMOUNT AND DATE-TIME */}
+                        {requiresAmountAndDate(selectedDisposition) && (
+                          <>
+                            <input
+                              type="number"
+                              placeholder="Promise Amount (₹)"
+                              value={promiseAmount}
+                              onChange={(e) => setPromiseAmount(e.target.value)}
+                              className="w-full border rounded px-3 py-2"
+                              step="0.01"
+                            />
 
-                        {requiresFollowUp(selectedDisposition) && (
-                          <div className="flex gap-3">
-                            <input
-                              type="date"
-                              value={followUpDate}
-                              onChange={(e) =>
-                                setFollowUpDate(e.target.value)
-                              }
-                              className="border rounded px-2 py-1"
-                            />
-                            <input
-                              type="time"
-                              value={followUpTime}
-                              onChange={(e) =>
-                                setFollowUpTime(e.target.value)
-                              }
-                              className="border rounded px-2 py-1"
-                            />
-                          </div>
+                            <div className="flex gap-3">
+                              <input
+                                type="date"
+                                value={followUpDate}
+                                onChange={(e) => setFollowUpDate(e.target.value)}
+                                className="flex-1 border rounded px-2 py-1"
+                              />
+                              <input
+                                type="time"
+                                value={followUpTime}
+                                onChange={(e) => setFollowUpTime(e.target.value)}
+                                className="flex-1 border rounded px-2 py-1"
+                              />
+                            </div>
+                          </>
                         )}
 
-                        <div className="flex justify-end pt-17">
+                        {!requiresAmountAndDate(selectedDisposition) && selectedDisposition && (
+                          <p className="text-xs text-slate-500 italic">
+                            No amount or date-time required for this disposition
+                          </p>
+                        )}
+
+                        <div className="flex justify-end gap-2 pt-2">
+                          {isEditing && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setIsEditing(false);
+                                setSelectedDisposition("");
+                                setRemarks("");
+                                setPromiseAmount("");
+                                setFollowUpDate("");
+                                setFollowUpTime("");
+                              }}
+                              className="px-4 py-2 text-xs rounded border border-slate-300 hover:bg-slate-100"
+                            >
+                              Cancel
+                            </button>
+                          )}
                           <button
                             type="submit"
                             disabled={submitting}
                             className="px-5 py-2 text-xs rounded bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-60"
                           >
-                            {submitting ? "..." : "Submit"}
+                            {submitting ? "..." : isEditing ? "Update" : "Submit"}
                           </button>
                         </div>
                       </div>
@@ -324,6 +406,61 @@ const CustomerDetailDrawer = ({
           </div>
         </div>
       </div>
+
+      {/* EDIT HISTORY MODAL */}
+      {showEditHistoryModal && editHistory.length > 1 && (
+        <>
+          <div 
+            className="fixed inset-0 z-40 bg-black/50" 
+            onClick={() => setShowEditHistoryModal(false)} 
+          />
+          <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
+            <div className="relative w-full max-w-2xl bg-white rounded-2xl shadow-2xl flex flex-col max-h-[80vh]">
+              {/* Header */}
+              <div className="border-b px-6 py-4 flex justify-between items-center">
+                <h3 className="text-lg font-semibold">Previous Edits</h3>
+                <button 
+                  onClick={() => setShowEditHistoryModal(false)} 
+                  className="text-xl"
+                >
+                  ✕
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto px-6 py-6 space-y-3">
+                {editHistory.slice(0, -1).reverse().map((edit, i) => (
+                  <div key={i} className="p-4 bg-slate-50 border rounded text-sm space-y-2">
+                    <p className="text-xs text-slate-500 font-medium">
+                      {new Date(edit.edited_at).toLocaleString("en-IN")}
+                    </p>
+                    <div className="space-y-1">
+                      <p><span className="font-medium">Disposition:</span> {edit.disposition}</p>
+                      {edit.remarks && <p><span className="font-medium">Remarks:</span> {edit.remarks}</p>}
+                      {edit.promise_amount && (
+                        <p><span className="font-medium">Amount:</span> ₹{parseFloat(edit.promise_amount).toFixed(2)}</p>
+                      )}
+                      {edit.follow_up_date && (
+                        <p><span className="font-medium">Follow-up:</span> {edit.follow_up_date} at {edit.follow_up_time}</p>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Footer */}
+              <div className="border-t px-6 py-4 flex justify-end">
+                <button 
+                  onClick={() => setShowEditHistoryModal(false)}
+                  className="px-4 py-2 text-sm rounded bg-slate-200 hover:bg-slate-300"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
     </>
   );
 };
