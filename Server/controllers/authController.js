@@ -64,7 +64,7 @@ export const login = async (req, res) => {
     }
 
     // Generate token
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '7d' });
+    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
 
     // Role-based redirect path for frontend
     const redirectTo = user.role === 'ADMIN' ? '/admin/dashboard' : '/agent/dashboard';

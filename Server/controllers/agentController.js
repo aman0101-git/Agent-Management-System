@@ -3,6 +3,7 @@ import pool from '../config/mysql.js';
 /**
  * GET /api/agent/cases
  * Fetch agent dashboard list from Coll_Data table
+ * Excludes IN_PROCESS status (Rechurn) data
  */
 export const getAgentCases = async (req, res) => {
   try {
@@ -28,6 +29,7 @@ export const getAgentCases = async (req, res) => {
         ON ac.coll_data_id = c.id
       WHERE c.agent_id = ?
         AND c.is_active = 1
+        AND COALESCE(ac.status, 'NEW') != 'IN_PROGRESS'
       ORDER BY c.created_at DESC
       `,
       [agentId]
@@ -49,6 +51,9 @@ export const getAgentCaseById = async (req, res) => {
     const agentId = req.user.id;
     const { caseId } = req.params;
 
+    /* ===============================
+       1️⃣ Fetch main case details
+       =============================== */
     const [[row]] = await pool.query(
       `
       SELECT
@@ -95,7 +100,9 @@ export const getAgentCaseById = async (req, res) => {
       LEFT JOIN agent_cases ac
         ON ac.coll_data_id = c.id
       WHERE c.id = ?
-        AND (c.agent_id = ? OR c.agent_id IS NULL)
+        AND c.agent_id = ?
+      ORDER BY ac.created_at DESC
+      LIMIT 1
       `,
       [caseId, agentId]
     );
@@ -104,37 +111,77 @@ export const getAgentCaseById = async (req, res) => {
       return res.status(404).json({ message: "Case not found" });
     }
 
-    // Get current dispositions
-    const [dispositions] = await pool.query(
+    /* ===============================
+       2️⃣ Resolve latest agent_case_id
+       =============================== */
+    const [[agentCase]] = await pool.query(
       `
-      SELECT id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, created_at
-      FROM agent_dispositions
-      WHERE agent_case_id = (
-        SELECT id FROM agent_cases WHERE coll_data_id = ?
-      )
+      SELECT id
+      FROM agent_cases
+      WHERE coll_data_id = ?
+        AND agent_id = ?
       ORDER BY created_at DESC
+      LIMIT 1
       `,
-      [caseId]
+      [caseId, agentId]
     );
 
-    // Get edit history
+    if (!agentCase) {
+      return res.json({
+        case: row,
+        dispositions: [],
+        editHistory: [],
+      });
+    }
+
+    /* ===============================
+       3️⃣ Fetch disposition history
+       =============================== */
+    const [dispositions] = await pool.query(
+      `
+      SELECT
+        id,
+        agent_case_id,
+        disposition,
+        remarks,
+        promise_amount,
+        follow_up_date,
+        follow_up_time,
+        created_at
+      FROM agent_dispositions
+      WHERE agent_case_id = ?
+      ORDER BY created_at DESC
+      `,
+      [agentCase.id]
+    );
+
+    /* ===============================
+       4️⃣ Fetch full edit history
+       =============================== */
     const [editHistory] = await pool.query(
       `
-      SELECT id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, edited_at
+      SELECT
+        id,
+        agent_case_id,
+        disposition,
+        remarks,
+        promise_amount,
+        follow_up_date,
+        follow_up_time,
+        edited_at
       FROM agent_dispositions_edit_history
-      WHERE agent_case_id = (
-        SELECT id FROM agent_cases WHERE coll_data_id = ?
-      )
+      WHERE agent_case_id = ?
       ORDER BY edited_at DESC
       `,
-      [caseId]
+      [agentCase.id]
     );
 
     return res.json({
       case: row,
-      dispositions: dispositions || [],
-      editHistory: editHistory || [],
+      dispositions,
+      editHistory,
     });
+
   } catch (err) {
     console.error("getAgentCaseById error:", err);
     return res.status(500).json({ message: "Failed to fetch case details" });
@@ -144,34 +191,43 @@ export const getAgentCaseById = async (req, res) => {
 
 /**
  * POST /api/agent/cases/:caseId/disposition
- * Submit or edit disposition with automatic status tracking
+ * Submit or edit disposition
  */
 export const submitDisposition = async (req, res) => {
   const conn = await pool.getConnection();
   try {
     const agentId = req.user.id;
     const { caseId } = req.params;
-    const { disposition, remarks, promiseAmount, followUpDate, followUpTime, isEdit } = req.body;
+    const {
+      disposition,
+      remarks,
+      promiseAmount,
+      followUpDate,
+      followUpTime,
+      isEdit,
+    } = req.body;
 
-    // Status mapping by disposition type
-    const FOLLOW_UP = ['PTP','BRP','PRT','CBC'];
-    const IN_PROGRESS = ['RTP','TPC','LNB','VOI','RNR','SOW','OOS','WRN'];
+    const NEEDS_FOLLOW_UP = ['PTP','BRP','PRT','CBC'];
+    const NEEDS_AMOUNT = ['PTP','BRP','PRT','SIF','PIF'];
     const DONE = ['SIF','PIF','FCL'];
+    const IN_PROGRESS = ['RTP','TPC','LNB','VOI','RNR','SOW','OOS','WRN'];
 
-    if (!disposition)
+    if (!disposition) {
       return res.status(400).json({ message: "Disposition required" });
+    }
 
     await conn.beginTransaction();
 
-    // 1️⃣ Verify agent case exists and belongs to agent
-    // ✅ Works for BOTH edit & normal submit
+    /* ===============================
+       1️⃣ Lock latest agent_case
+       =============================== */
     const [[agentCase]] = await conn.query(
       `
       SELECT id, status
       FROM agent_cases
       WHERE coll_data_id = ?
         AND agent_id = ?
-      ORDER BY id DESC
+      ORDER BY created_at DESC
       LIMIT 1
       FOR UPDATE
       `,
@@ -183,72 +239,100 @@ export const submitDisposition = async (req, res) => {
       return res.status(404).json({ message: "Agent case not found" });
     }
 
-
-    // 2️⃣ Determine new status based on disposition
+    /* ===============================
+       2️⃣ Determine new status
+       =============================== */
     let newStatus = agentCase.status;
-    if (FOLLOW_UP.includes(disposition)) newStatus = 'FOLLOW_UP';
+
+    if (NEEDS_FOLLOW_UP.includes(disposition)) newStatus = 'FOLLOW_UP';
     else if (IN_PROGRESS.includes(disposition)) newStatus = 'IN_PROGRESS';
     else if (DONE.includes(disposition)) newStatus = 'DONE';
 
     const statusChanged = newStatus !== agentCase.status;
 
-    // 3️⃣ If editing, save old disposition to edit history
+    /* ===============================
+       3️⃣ Save edit history if editing
+       =============================== */
     if (isEdit) {
       const [[lastDisposition]] = await conn.query(
-        `SELECT * FROM agent_dispositions 
-         WHERE agent_case_id = ? 
-         ORDER BY created_at DESC 
-         LIMIT 1`,
+        `
+        SELECT *
+        FROM agent_dispositions
+        WHERE agent_case_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
         [agentCase.id]
       );
 
       if (lastDisposition) {
         await conn.query(
-          `INSERT INTO agent_dispositions_edit_history 
-           (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, edited_at)
-           VALUES (?, ?, ?, ?, ?, ?, NOW())`,
-          [agentCase.id, lastDisposition.disposition, lastDisposition.remarks, 
-           lastDisposition.promise_amount, lastDisposition.follow_up_date, lastDisposition.follow_up_time]
+          `
+          INSERT INTO agent_dispositions_edit_history
+          (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, edited_at)
+          VALUES (?, ?, ?, ?, ?, ?, NOW())
+          `,
+          [
+            agentCase.id,
+            lastDisposition.disposition,
+            lastDisposition.remarks,
+            lastDisposition.promise_amount,
+            lastDisposition.follow_up_date,
+            lastDisposition.follow_up_time,
+          ]
         );
       }
 
-      // Delete old disposition and insert new one
       await conn.query(
-        `DELETE FROM agent_dispositions WHERE agent_case_id = ? ORDER BY created_at DESC LIMIT 1`,
+        `
+        DELETE FROM agent_dispositions
+        WHERE agent_case_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
+        `,
         [agentCase.id]
       );
     }
 
-    // 4️⃣ Insert or update disposition
+    /* ===============================
+       4️⃣ Insert new disposition
+       =============================== */
     await conn.query(
-      `INSERT INTO agent_dispositions
-       (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+      `
+      INSERT INTO agent_dispositions
+      (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
+      VALUES (?, ?, ?, ?, ?, ?)
+      `,
       [
         agentCase.id,
         disposition,
         remarks || null,
-        (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? promiseAmount : null,
-        (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpDate : null,
-        (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpTime : null,
+        NEEDS_AMOUNT.includes(disposition) ? promiseAmount : null,
+        NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
+        NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
       ]
     );
 
-    // 5️⃣ Update case status only if it changed
+    /* ===============================
+       5️⃣ Update agent_case
+       =============================== */
     if (statusChanged) {
       await conn.query(
-        `UPDATE agent_cases
-         SET
-           status = ?,
-           is_active = 0,
-           last_call_at = NOW(),
-           follow_up_date = ?,
-           follow_up_time = ?
-         WHERE id = ?`,
+        `
+        UPDATE agent_cases
+        SET
+          status = ?,
+          is_active = 0,
+          first_call_at = COALESCE(first_call_at, NOW()),
+          last_call_at = NOW(),
+          follow_up_date = ?,
+          follow_up_time = ?
+        WHERE id = ?
+        `,
         [
           newStatus,
-          (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpDate : null,
-          (FOLLOW_UP.includes(disposition) || DONE.includes(disposition)) ? followUpTime : null,
+          NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
+          NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
           agentCase.id,
         ]
       );
@@ -256,13 +340,12 @@ export const submitDisposition = async (req, res) => {
 
     await conn.commit();
 
-    // Only allocate next if status changes to DONE (not for FOLLOW_UP or IN_PROGRESS)
-    const shouldAllocateNext = statusChanged;
-
+    const allocateNextOnStatusChange = statusChanged;
     return res.json({
       message: "Disposition saved successfully",
       status: newStatus,
-      allocateNext: shouldAllocateNext
+      allocateNext: statusChanged && newStatus === 'DONE',
+      allocateNextOnStatusChange,
     });
 
   } catch (err) {
