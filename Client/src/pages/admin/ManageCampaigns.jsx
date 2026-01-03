@@ -29,8 +29,27 @@ const ManageCampaigns = () => {
   };
 
   useEffect(() => {
-    fetchCampaigns();
-  }, []);
+    let mounted = true;
+    const headersLocal = { Authorization: `Bearer ${token}` };
+
+    (async () => {
+      try {
+        const res = await axios.get(
+          "http://localhost:5000/api/campaigns/all",
+          { headers: headersLocal }
+        );
+        if (!mounted) return;
+        setCampaigns(res.data);
+      } catch {
+        if (!mounted) return;
+        setError("Failed to load campaigns");
+      }
+    })();
+
+    return () => {
+      mounted = false;
+    };
+  }, [token]);
 
   const toggleCampaign = async (id, status) => {
     try {

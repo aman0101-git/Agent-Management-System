@@ -14,7 +14,7 @@ const AgentDashboard = () => {
 
   const [selectedCaseId, setSelectedCaseId] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [expandedRowId, setExpandedRowId] = useState(null);
+  // unused expanded row state removed to satisfy lint
 
   useEffect(() => {
     const loadCases = async () => {
@@ -197,6 +197,7 @@ const AgentDashboard = () => {
               <div className="col-span-1">Alloc. Date</div>
               <div className="col-span-1">Inst. Amt</div>
               <div className="col-span-1">POS</div>
+              <div className="col-span-1">BOM_BKT</div>
               <div className="col-span-1">Follow-up</div>
               <div className="col-span-1 text-right">Action</div>
             </div>
@@ -225,6 +226,9 @@ const AgentDashboard = () => {
                   </div>
                   <div className="col-span-1 text-xs">
                     {caseItem.pos || "-"}
+                  </div>
+                  <div className="col-span-1 text-xs">
+                    {caseItem.bom_bucket || "-"}
                   </div>
                   <div className="col-span-1 text-xs">
                     {caseItem.follow_up_date

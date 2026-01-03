@@ -138,6 +138,10 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
           </div>
         )}
 
+        {loading && (
+          <p className="mb-4 text-sm text-slate-500">Loading…</p>
+        )}
+
         {/* ===============================
            Multi-select Disposition Filter
            =============================== */}

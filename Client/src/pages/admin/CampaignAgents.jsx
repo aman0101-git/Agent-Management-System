@@ -14,18 +14,20 @@ const CampaignAgents = () => {
   const [assignedAgents, setAssignedAgents] = useState([]);
 
   useEffect(() => {
+    const headersLocal = { Authorization: `Bearer ${token}` };
     axios
-      .get("http://localhost:5000/api/campaigns", { headers })
+      .get("http://localhost:5000/api/campaigns", { headers: headersLocal })
       .then((res) => setCampaigns(res.data))
       .catch(() => setError("Failed to load campaigns"));
-  }, []);
+  }, [token]);
 
   useEffect(() => {
+    const headersLocal = { Authorization: `Bearer ${token}` };
     axios
-      .get("http://localhost:5000/api/users?role=AGENT&isActive=true", { headers })
+      .get("http://localhost:5000/api/users?role=AGENT&isActive=true", { headers: headersLocal })
       .then((res) => setAgents(res.data))
       .catch(() => setError("Failed to load agents"));
-  }, []);
+  }, [token]);
 
   const loadAssignedAgents = async (campaignId) => {
     try {

@@ -18,7 +18,7 @@ const Field = ({ label, value }) => (
   <div>
     <p className="text-slate-500 mb-1">{label}</p>
     <p className="font-medium text-slate-900 break-words">
-      {value ?? "-"}
+      {value || "-"}
     </p>
   </div>
 );
@@ -95,7 +95,7 @@ const CustomerDetailDrawer = ({
       if (typeof data.extra_fields === "string") {
         try {
           data.extra_fields = JSON.parse(data.extra_fields);
-        } catch {}
+        } catch { /* ignore parse errors for extra_fields */ }
       }
 
       setCaseData(data);
@@ -158,13 +158,8 @@ const CustomerDetailDrawer = ({
       // If status changed, allocate next customer
       if (res.allocateNext || res.allocateNextOnStatusChange) {
         try {
-          const nextRes = await fetchNextCase(token);
-          if (nextRes.status === 200) {
-            console.log("Next customer allocated:", nextRes.data);
-          }
-        } catch (err) {
-          console.log("No more customers available or already has active case");
-        }
+          await fetchNextCase(token);
+        } catch { /* allocation attempt failed; nothing required client-side */ }
       }
 
       // Reload case details
@@ -231,7 +226,7 @@ const CustomerDetailDrawer = ({
                   <Field label="DPD" value={caseData.dpd} />
                   <Field label="POS" value={caseData.pos} />
                   <Field label="Installment Amount" value={caseData.insl_amt} />
-                  <Field label="Outstanding Amount" value={caseData.amt_outst} />
+                  <Field label="Bom Bucket" value={caseData.bom_bucket} />
                   <Field label="Tenure" value={caseData.tenure} />
                 </Section>
 
@@ -277,7 +272,7 @@ const CustomerDetailDrawer = ({
                                   {latest.disposition}
                                 </strong>
                                 <p className="text-xs text-slate-500 mt-1">
-                                  {new Date(latest.created_at).toLocaleString("en-IN")}
+                                  {latest.created_at ? new Date(latest.created_at).toLocaleString("en-IN") : "-"}
                                 </p>
                               </div>
                               <button
@@ -332,7 +327,7 @@ const CustomerDetailDrawer = ({
                                   className="p-3 border rounded bg-slate-50 text-sm space-y-1"
                                 >
                                   <p className="text-xs text-slate-500">
-                                    {new Date(d.created_at).toLocaleString("en-IN")}
+                                    {d.created_at ? new Date(d.created_at).toLocaleString("en-IN") : "-"}
                                   </p>
 
                                   <p>
