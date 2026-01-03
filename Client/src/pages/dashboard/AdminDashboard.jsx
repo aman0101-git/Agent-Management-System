@@ -12,7 +12,7 @@ const AdminDashboard = () => {
         <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">
-              Admin Dashboard
+              Welcome, {user?.firstName} {user?.lastName}
             </h1>
             <p className="text-sm text-slate-500">
               Control & monitor system operations
@@ -31,14 +31,6 @@ const AdminDashboard = () => {
 
       {/* Main */}
       <main className="mx-auto max-w-7xl px-6 py-10">
-        {/* User Info */}
-        <div className="mb-10">
-          <p className="text-sm text-slate-500">Logged in as</p>
-          <p className="text-lg font-semibold text-slate-900">
-            Welcome, {user.firstName}
-          </p>
-        </div>
-
         {/* Action Cards */}
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {[

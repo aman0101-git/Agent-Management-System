@@ -103,11 +103,11 @@ const AgentDashboard = () => {
     followUpDate.setHours(0, 0, 0, 0);
 
     if (followUpDate < today) {
-      return "bg-red-50 hover:bg-red-100";
+      return "bg-red-100 hover:bg-red-200";
     }
 
     if (followUpDate.getTime() === today.getTime()) {
-      return "bg-yellow-50 hover:bg-yellow-100";
+      return "bg-yellow-100 hover:bg-yellow-200";
     }
 
     return "";
@@ -161,7 +161,7 @@ const AgentDashboard = () => {
         <div className="mx-auto max-w-7xl px-6 py-4 flex justify-between items-center">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">
-              Agent Dashboard
+              Welcome, {user?.firstName} {user?.lastName}
             </h1>
             <p className="text-sm text-slate-500">
               {filteredCases.length} allocated accounts

@@ -25,6 +25,36 @@ const Field = ({ label, value }) => (
 
 /* ---------- Main ---------- */
 
+const formatFollowUp = (date, time) => {
+  if (!date) return "";
+
+  let d;
+
+  // Case 1: date is already ISO (contains T)
+  if (typeof date === "string" && date.includes("T")) {
+    d = new Date(date);
+  }
+  // Case 2: date + time are separate
+  else if (time) {
+    d = new Date(`${date}T${time}`);
+  }
+  // Case 3: date only
+  else {
+    d = new Date(date);
+  }
+
+  if (isNaN(d.getTime())) return "";
+
+  const formattedDate = d.toLocaleDateString("en-GB"); // DD/MM/YYYY
+  const formattedTime = d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    hour12: true,
+  });
+
+  return `${formattedDate} at ${formattedTime}`;
+};
+
 const CustomerDetailDrawer = ({
   caseId,
   isOpen,
@@ -126,7 +156,7 @@ const CustomerDetailDrawer = ({
       );
 
       // If status changed, allocate next customer
-      if (res.allocateNext) {
+      if (res.allocateNext || res.allocateNextOnStatusChange) {
         try {
           const nextRes = await fetchNextCase(token);
           if (nextRes.status === 200) {
@@ -208,11 +238,10 @@ const CustomerDetailDrawer = ({
                 {/* CASE INFO */}
                 <Section title="Case Information">
                   <Field label="Status" value={caseData.status} />
-                  <Field label="Allocation Date" value={caseData.allocation_date} />
-                  <Field label="First Call" value={caseData.first_call_at} />
-                  <Field label="Last Call" value={caseData.last_call_at} />
-                  <Field label="Follow-up Date" value={caseData.follow_up_date} />
-                  <Field label="Follow-up Time" value={caseData.follow_up_time} />
+                  <Field label="Allocation Date" value={formatFollowUp(caseData.allocation_date)} />
+                  <Field label="First Call" value={formatFollowUp(caseData.first_call_at)} />
+                  <Field label="Last Call" value={formatFollowUp(caseData.last_call_at)} />
+                  <Field label="Follow-up Date and Time" value={formatFollowUp(caseData.follow_up_date)} />
                 </Section>
 
                 <Section title="Other Information">
@@ -275,8 +304,7 @@ const CustomerDetailDrawer = ({
 
                             {latest.follow_up_date && (
                               <p className="text-sm">
-                                Follow-up: {latest.follow_up_date} at{" "}
-                                {latest.follow_up_time || "N/A"}
+                                Follow-up: {formatFollowUp(latest.follow_up_date, latest.follow_up_time)}
                               </p>
                             )}
                           </div>
@@ -329,7 +357,7 @@ const CustomerDetailDrawer = ({
                                   {d.follow_up_date && (
                                     <p>
                                       <span className="font-medium">Follow-up:</span>{" "}
-                                      {d.follow_up_date} at {d.follow_up_time}
+                                      {formatFollowUp(d.follow_up_date)} {formatFollowUp(d.follow_up_time)}
                                     </p>
                                   )}
                                 </div>
@@ -459,6 +487,15 @@ const CustomerDetailDrawer = ({
               {/* Header */}
               <div className="border-b px-6 py-4 flex justify-between items-center">
                 <h3 className="text-lg font-semibold">Previous Edits</h3>
+                {editHistory.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setShowEditHistoryModal(true)}
+                    className="text-sm font-medium text-indigo-700 hover:underline"
+                  >
+                    View full edit history
+                  </button>
+                )}
                 <button 
                   onClick={() => setShowEditHistoryModal(false)} 
                   className="text-xl"

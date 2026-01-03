@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
+import RechurnModal from "@/components/RechurnModal";
 import axios from "axios";
 import { fetchCampaignDistributionSummary } from "@/api/campaignApi";
 
@@ -12,6 +13,8 @@ const ManageCampaigns = () => {
   const [error, setError] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const [summaryData, setSummaryData] = useState({});
+  const [rechurnModalOpen, setRechurnModalOpen] = useState(false);
+  const [selectedCampaignId, setSelectedCampaignId] = useState(null);
 
   const fetchCampaigns = async () => {
     try {
@@ -44,7 +47,6 @@ const ManageCampaigns = () => {
     }
   };
 
-
   const loadSummary = async (campaignId) => {
     try {
       const res = await fetchCampaignDistributionSummary(campaignId, token);
@@ -62,6 +64,19 @@ const ManageCampaigns = () => {
     if (summary.unassignedRecords === 0) return "DONE";
     if (summary.assignedRecords > 0) return "PARTIAL";
     return "READY";
+  };
+
+  const handleRechurnClick = (campaignId) => {
+    setSelectedCampaignId(campaignId);
+    setRechurnModalOpen(true);
+  };
+
+  const handleRechurnSuccess = () => {
+    // Refresh campaigns and summary data
+    fetchCampaigns();
+    if (selectedCampaignId && expandedId === selectedCampaignId) {
+      loadSummary(selectedCampaignId);
+    }
   };
 
   return (
@@ -185,6 +200,15 @@ const ManageCampaigns = () => {
                     </div>
                   </div>
 
+                  <div className="mb-4 flex justify-end">
+                    <Button
+                      onClick={() => handleRechurnClick(c.id)}
+                      className="bg-orange-100 text-orange-700 hover:bg-orange-200"
+                    >
+                      RECHURN
+                    </Button>
+                  </div>
+
                   {summary.agents && summary.agents.length > 0 && (
                     <div className="overflow-hidden rounded-lg border bg-white">
                       <div className="border-b bg-slate-100 px-4 py-3">
@@ -233,6 +257,13 @@ const ManageCampaigns = () => {
           </div>
         )}
       </div>
+
+      <RechurnModal
+        campaignId={selectedCampaignId}
+        isOpen={rechurnModalOpen}
+        onClose={() => setRechurnModalOpen(false)}
+        onSuccess={handleRechurnSuccess}
+      />
     </div>
   );
 };
