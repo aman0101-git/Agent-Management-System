@@ -15,6 +15,8 @@ const ManageCampaigns = () => {
   const [summaryData, setSummaryData] = useState({});
   const [rechurnModalOpen, setRechurnModalOpen] = useState(false);
   const [selectedCampaignId, setSelectedCampaignId] = useState(null);
+  const [targetAmount, setTargetAmount] = useState({});
+  const [settingTarget, setSettingTarget] = useState({});
 
   const fetchCampaigns = async () => {
     try {
@@ -98,6 +100,38 @@ const ManageCampaigns = () => {
     }
   };
 
+  const handleSetTarget = async (campaignId) => {
+  try {
+    const amount = Number(targetAmount[campaignId]);
+
+    if (!amount || amount <= 0) {
+      setError("Please enter a valid target amount");
+      return;
+    }
+
+    setSettingTarget((prev) => ({ ...prev, [campaignId]: true }));
+
+    await axios.post(
+      `http://localhost:5000/api/campaigns/${campaignId}/set-target`,
+      { target_amount: amount },
+      { headers }
+    );
+
+    // ✅ DO NOT clear the input
+    // ✅ Keep the value so admin can see what was set
+
+    // Refresh campaigns so c.target_amount updates
+    await fetchCampaigns();
+
+    setError("");
+  } catch (err) {
+    console.error(err);
+    setError("Failed to set campaign target");
+  } finally {
+    setSettingTarget((prev) => ({ ...prev, [campaignId]: false }));
+  }
+};
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
       <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-100">
@@ -144,6 +178,12 @@ const ManageCampaigns = () => {
                     >
                       {status}
                     </span>
+
+                    {c.target_amount && (
+                      <span className="rounded-full bg-blue-50 px-3 py-0.5 text-xs font-semibold text-blue-600">
+                        Target: ₹{c.target_amount.toLocaleString()}
+                      </span>
+                    )}
                   </div>
                 </div>
 
@@ -181,6 +221,38 @@ const ManageCampaigns = () => {
 
               {expandedId === c.id && summary && (
                 <div className="border-t bg-slate-50 px-4 py-4">
+                  {/* Set Campaign Target */}
+                  <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+                    <p className="mb-3 text-sm font-semibold text-blue-900">
+                      Set Monthly Collection Target
+                    </p>
+                    <div className="flex gap-2">
+                      <input
+                        type="number"
+                        placeholder="Enter target amount"
+                        value={targetAmount[c.id] || ""}
+                        onChange={(e) =>
+                          setTargetAmount((prev) => ({
+                            ...prev,
+                            [c.id]: e.target.value,
+                          }))
+                        }
+                        className="flex-1 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
+                      />
+                      <Button
+                        onClick={() => handleSetTarget(c.id)}
+                        disabled={settingTarget[c.id]}
+                        className="bg-blue-600 text-white hover:bg-blue-700"
+                      >
+                        {settingTarget[c.id] ? "Setting..." : "Set Target"}
+                      </Button>
+                    </div>
+                    {c.target_amount && (
+                      <p className="mt-2 text-xs text-blue-700">
+                        Current Target: ₹{c.target_amount.toLocaleString()}
+                      </p>
+                    )}
+                  </div>
                   <div className="mb-4 grid grid-cols-2 gap-4">
                     <div className="rounded-lg border bg-white p-3">
                       <p className="text-sm text-slate-600">

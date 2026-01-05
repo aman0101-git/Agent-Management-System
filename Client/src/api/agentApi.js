@@ -50,6 +50,33 @@ export const fetchNextCase = async (token) => {
   return res;
 };
 
+// Search customers across entire database
+export const searchCustomers = async (query, token) => {
+  const res = await axios.post(
+    `${API_BASE}/search`,
+    { query },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
+
+  return res.data;
+};
+
+// Fetch agent performance analytics
+export const fetchAnalytics = async (timeFilter, token) => {
+  const res = await axios.get(`${API_BASE}/analytics`, {
+    params: { timeFilter },
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data;
+};
+
 // Kept for backward compatibility
 export const fetchAgentLoans = fetchAgentCases;
 export const fetchCustomerDetails = fetchCaseDetails;

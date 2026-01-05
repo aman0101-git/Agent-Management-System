@@ -2,6 +2,8 @@ import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/auth/Login';
 import AdminDashboard from "./pages/dashboard/AdminDashboard";
 import AgentDashboard from "./pages/dashboard/AgentDashboard";
+import CustomerSearch from "./pages/dashboard/CustomerSearch";
+import PerformanceAnalytics from "./pages/dashboard/PerformanceAnalytics";
 import ProtectedRoute from "./components/ProtectedRoute";
 import CreateUser from "./pages/admin/CreateUser";
 import UploadData from "./pages/admin/UploadData";
@@ -37,6 +39,24 @@ function App() {
         element={
           <ProtectedRoute allowedRoles={["AGENT"]}>
             <AgentDashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/agent/search"
+        element={
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <CustomerSearch />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/agent/analytics"
+        element={
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <PerformanceAnalytics />
           </ProtectedRoute>
         }
       />

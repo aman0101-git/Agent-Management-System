@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { fetchAgentCases, fetchNextCase } from "@/api/agentApi";
 import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
@@ -176,6 +177,30 @@ const AgentDashboard = () => {
           </Button>
         </div>
       </header>
+
+      {/* Navigation Tabs */}
+      <nav className="border-b bg-white sticky top-16 z-10">
+        <div className="mx-auto max-w-7xl px-6 flex gap-8">
+          <Link
+            to="/agent/dashboard"
+            className="py-3 px-1 text-sm font-medium border-b-2 border-blue-600 text-blue-600"
+          >
+            My Allocations
+          </Link>
+          <Link
+            to="/agent/search"
+            className="py-3 px-1 text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
+          >
+            Customer Search
+          </Link>
+          <Link
+            to="/agent/analytics"
+            className="py-3 px-1 text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
+          >
+            Performance Analytics
+          </Link>
+        </div>
+      </nav>
 
       {/* Main */}
       <main className="mx-auto max-w-7xl px-6 py-8">
