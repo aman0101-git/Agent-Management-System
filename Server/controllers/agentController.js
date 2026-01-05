@@ -299,17 +299,39 @@ export const submitDisposition = async (req, res) => {
     /* ===============================
        4️⃣ Insert new disposition
        =============================== */
+    let dispositionAmount = null;
+
+    // For RTP (Refuse to Pay), automatically fetch and use last PTP amount
+    if (disposition === 'RTP') {
+      const [[lastPtp]] = await conn.query(
+        `SELECT promise_amount FROM agent_dispositions
+         WHERE agent_case_id = ? AND disposition = 'PTP'
+         ORDER BY created_at DESC LIMIT 1`,
+        [agentCase.id]
+      );
+      
+      if (lastPtp && lastPtp.promise_amount > 0) {
+        dispositionAmount = lastPtp.promise_amount;
+      } else {
+        await conn.rollback();
+        return res.status(400).json({ message: "No PTP amount found to refuse" });
+      }
+    } else if (NEEDS_AMOUNT.includes(disposition)) {
+      dispositionAmount = promiseAmount;
+    }
+
     await conn.query(
       `
       INSERT INTO agent_dispositions
-      (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
-      VALUES (?, ?, ?, ?, ?, ?)
+      (agent_case_id, agent_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
       `,
       [
         agentCase.id,
+        agentId,
         disposition,
         remarks || null,
-        NEEDS_AMOUNT.includes(disposition) ? promiseAmount : null,
+        dispositionAmount,
         NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
         NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
       ]
@@ -419,5 +441,315 @@ export const getNextCase = async (req, res) => {
     return res.status(500).json({ message: "Failed to fetch next case" });
   } finally {
     conn.release();
+  }
+};
+
+/**
+ * POST /api/agent/search
+ * Search any customer in the database by Loan ID, Name, or Phone
+ * Automatically creates agent_case if none exists (for inbound calls)
+ */
+export const searchCustomers = async (req, res) => {
+  try {
+    const agentId = req.user.id;
+    const { query } = req.body;
+
+    if (!query || query.trim().length === 0) {
+      return res.status(400).json({ message: "Search query required" });
+    }
+
+    const searchTerm = `%${query}%`;
+
+    const [customers] = await pool.query(
+      `
+      SELECT
+        id,
+        loan_agreement_no,
+        cust_name,
+        mobileno,
+        appl_id,
+        branch_name,
+        hub_name,
+        amt_outst,
+        pos,
+        bom_bucket,
+        dpd,
+        loan_status,
+        res_addr,
+        created_at
+      FROM coll_data
+      WHERE (
+        loan_agreement_no LIKE ?
+        OR LOWER(cust_name) LIKE LOWER(?)
+        OR mobileno LIKE ?
+      )
+      AND is_active = 1
+      ORDER BY id DESC
+      LIMIT 50
+      `,
+      [searchTerm, searchTerm, searchTerm]
+    );
+
+    // For each customer, ensure agent_case exists (for inbound calls)
+    const enrichedCustomers = await Promise.all(
+      customers.map(async (customer) => {
+        const [[existingCase]] = await pool.query(
+          `SELECT id FROM agent_cases WHERE coll_data_id = ? AND agent_id = ? LIMIT 1`,
+          [customer.id, agentId]
+        );
+
+        if (!existingCase) {
+          // Create new agent_case for this customer
+          await pool.query(
+            `INSERT INTO agent_cases (agent_id, coll_data_id, status, is_active) VALUES (?, ?, 'NEW', 1)`,
+            [agentId, customer.id]
+          );
+        }
+
+        return customer;
+      })
+    );
+
+    res.json({ data: enrichedCustomers, count: enrichedCustomers.length });
+  } catch (err) {
+    console.error("searchCustomers error:", err);
+    res.status(500).json({ message: "Failed to search customers" });
+  }
+};
+
+/**
+ * GET /api/agent/analytics
+ * Get performance analytics for logged-in agent with time filtering
+ * Query params: timeFilter (today, yesterday, thisWeek, thisMonth)
+ */
+export const getAgentAnalytics = async (req, res) => {
+  try {
+    const agentId = req.user.id;
+    const { timeFilter = 'thisMonth' } = req.query;
+
+    // Get agent's campaign from coll_data (agent_id is stored in coll_data)
+    const [[agentData]] = await pool.query(
+      `SELECT DISTINCT campaign_id FROM coll_data WHERE agent_id = ? LIMIT 1`,
+      [agentId]
+    );
+
+    let targetAmount = null;
+    if (agentData?.campaign_id) {
+      const [[campaign]] = await pool.query(
+        `SELECT target_amount FROM campaigns WHERE id = ? AND status = 'ACTIVE'`,
+        [agentData.campaign_id]
+      );
+      targetAmount = campaign?.target_amount || null;
+    }
+
+    // Calculate date range based on timeFilter
+    const today = new Date();
+    const startDate = new Date();
+    const endDate = new Date();
+
+    endDate.setHours(23, 59, 59, 999);
+
+    switch (timeFilter) {
+      case 'today':
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'yesterday':
+        startDate.setDate(today.getDate() - 1);
+        startDate.setHours(0, 0, 0, 0);
+        endDate.setDate(today.getDate() - 1);
+        endDate.setHours(23, 59, 59, 999);
+        break;
+      case 'thisWeek':
+        startDate.setDate(today.getDate() - today.getDay());
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      case 'thisMonth':
+        startDate.setDate(1);
+        startDate.setHours(0, 0, 0, 0);
+        break;
+      default:
+        startDate.setHours(0, 0, 0, 0);
+    }
+
+    const startDateStr = startDate.toISOString();
+    const endDateStr = endDate.toISOString();
+
+    // Calculate monthly date range (ALWAYS calendar month, independent of filter)
+    const monthlyStart = new Date();
+    monthlyStart.setDate(1);
+    monthlyStart.setHours(0, 0, 0, 0);
+
+    const monthlyEnd = new Date();
+    monthlyEnd.setMonth(monthlyEnd.getMonth() + 1);
+    monthlyEnd.setDate(0);
+    monthlyEnd.setHours(23, 59, 59, 999);
+
+    const monthlyStartStr = monthlyStart.toISOString();
+    const monthlyEndStr = monthlyEnd.toISOString();
+
+    /* ===============================
+       SECTION A: Call & PTP Overview
+       =============================== */
+    const [[ptpData]] = await pool.query(
+      `
+      SELECT
+        COUNT(ad.id) AS calls_attended,
+        COUNT(DISTINCT CASE WHEN ad.disposition = 'PTP' THEN ad.agent_case_id END) AS ptp_count,
+        (
+          COALESCE(SUM(CASE WHEN ad.disposition = 'PTP' THEN ad.promise_amount ELSE 0 END),0)
+          -
+          COALESCE(SUM(CASE WHEN ad.disposition = 'RTP' THEN ad.promise_amount ELSE 0 END),0)
+        ) AS total_ptp_amount
+      FROM agent_dispositions ad
+      WHERE ad.agent_id = ?
+        AND ad.created_at BETWEEN ? AND ?
+      `,
+      [agentId, startDateStr, endDateStr]
+    );
+
+    /* ===============================
+       SECTION B: Collection Breakdown
+       =============================== */
+    const [collectionBreakdown] = await pool.query(
+      `
+      SELECT
+        disposition,
+        COUNT(*) AS customer_count,
+        COALESCE(SUM(promise_amount), 0) AS total_amount
+      FROM (
+        SELECT ad.*
+        FROM agent_dispositions ad
+        JOIN (
+          SELECT agent_case_id, MAX(created_at) AS latest_time
+          FROM agent_dispositions
+          WHERE agent_id = ?
+            AND created_at BETWEEN ? AND ?
+          GROUP BY agent_case_id
+        ) latest
+          ON latest.agent_case_id = ad.agent_case_id
+         AND latest.latest_time = ad.created_at
+      ) latest_cases
+      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+      GROUP BY disposition
+      `,
+      [agentId, startDateStr, endDateStr]
+    );
+
+    /* ===============================
+       SECTION C: Total Collection Summary (Time-filtered)
+       =============================== */
+    const [[collectionSummary]] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total_collected_count,
+        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
+      FROM (
+        SELECT ad.*
+        FROM agent_dispositions ad
+        JOIN (
+          SELECT agent_case_id, MAX(created_at) AS latest_time
+          FROM agent_dispositions
+          WHERE agent_id = ?
+            AND created_at BETWEEN ? AND ?
+          GROUP BY agent_case_id
+        ) latest
+          ON latest.agent_case_id = ad.agent_case_id
+         AND latest.latest_time = ad.created_at
+      ) latest_cases
+      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+      `,
+      [agentId, startDateStr, endDateStr]
+    );
+
+    /* ===============================
+       SECTION D: Monthly Summary (ALWAYS CALENDAR MONTH)
+       =============================== */
+    const [[monthlySummary]] = await pool.query(
+      `
+      SELECT
+        COUNT(*) AS total_collected_count,
+        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
+      FROM (
+        SELECT ad.*
+        FROM agent_dispositions ad
+        JOIN (
+          SELECT agent_case_id, MAX(created_at) AS latest_time
+          FROM agent_dispositions
+          WHERE agent_id = ?
+            AND created_at BETWEEN ? AND ?
+          GROUP BY agent_case_id
+        ) latest
+          ON latest.agent_case_id = ad.agent_case_id
+         AND latest.latest_time = ad.created_at
+      ) latest_cases
+      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+      `,
+      [agentId, monthlyStartStr, monthlyEndStr]
+    );
+
+    // Calculate monthly expected amount (PTP - RTP)
+    const [[monthlyExpected]] = await pool.query(
+      `
+      SELECT
+        (
+          COALESCE(SUM(CASE WHEN disposition = 'PTP' THEN promise_amount ELSE 0 END),0)
+          -
+          COALESCE(SUM(CASE WHEN disposition = 'RTP' THEN promise_amount ELSE 0 END),0)
+        ) AS expected_amount
+      FROM agent_dispositions
+      WHERE agent_id = ?
+        AND created_at BETWEEN ? AND ?
+      `,
+      [agentId, monthlyStartStr, monthlyEndStr]
+    );
+
+    // Format collection breakdown
+    const formattedBreakdown = {
+      PIF: { customer_count: 0, total_amount: 0 },
+      SIF: { customer_count: 0, total_amount: 0 },
+      FCL: { customer_count: 0, total_amount: 0 },
+      PRT: { customer_count: 0, total_amount: 0 },
+    };
+
+    collectionBreakdown.forEach((item) => {
+      formattedBreakdown[item.disposition] = {
+        customer_count: item.customer_count,
+        total_amount: item.total_amount,
+      };
+    });
+
+    // Calculate achievement percentage for monthly summary
+    const monthlyActual = monthlySummary.total_collected_amount || 0;
+    let achievementPercent = 0;
+    if (targetAmount && targetAmount > 0) {
+      achievementPercent = ((monthlyActual / targetAmount) * 100).toFixed(2);
+    }
+
+    res.json({
+      timeFilter,
+      dateRange: { start: startDateStr, end: endDateStr },
+      overview: {
+        calls_attended: ptpData.calls_attended || 0,
+        ptp_count: ptpData.ptp_count || 0,
+        total_ptp_amount: ptpData.total_ptp_amount || 0,
+      },
+      breakdown: formattedBreakdown,
+      summary: {
+        total_collected_count: collectionSummary.total_collected_count || 0,
+        total_collected_amount: collectionSummary.total_collected_amount || 0,
+      },
+      // Monthly summary (ALWAYS calendar month, independent of filter)
+      monthlySummary: {
+        dateRange: { start: monthlyStartStr, end: monthlyEndStr },
+        total_collected_count: monthlySummary.total_collected_count || 0,
+        total_collected_amount: monthlyActual,
+        expected_amount: monthlyExpected?.expected_amount || 0,
+        target_amount: targetAmount,
+        achievement_percent: targetAmount ? parseFloat(achievementPercent) : null,
+      },
+    });
+  } catch (err) {
+    console.error("getAgentAnalytics error:", err);
+    res.status(500).json({ message: "Failed to fetch analytics" });
   }
 };

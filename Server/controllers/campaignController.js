@@ -366,3 +366,33 @@ export const rechurnCampaignData = async (req, res) => {
     conn.release();
   }
 };
+
+// Set campaign target amount
+export const setCampaignTarget = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { target_amount } = req.body;
+
+    if (!target_amount || target_amount <= 0) {
+      return res.status(400).json({ message: "Valid target amount required" });
+    }
+
+    const [campaign] = await pool.query(
+      "SELECT id FROM campaigns WHERE id = ? AND status = 'ACTIVE'",
+      [id]
+    );
+
+    if (!campaign.length) {
+      return res.status(404).json({ message: "Campaign not found or inactive" });
+    }
+
+    await pool.query(
+      "UPDATE campaigns SET target_amount = ? WHERE id = ?",
+      [parseFloat(target_amount), id]
+    );
+
+    res.json({ message: "Campaign target updated", campaign_id: id, target_amount: parseFloat(target_amount) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};

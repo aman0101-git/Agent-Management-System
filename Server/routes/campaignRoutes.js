@@ -10,7 +10,8 @@ import {
   distributeCampaignData,
   getCampaignDistributionSummary,
   getRechurnData,
-  rechurnCampaignData
+  rechurnCampaignData,
+  setCampaignTarget
 } from "../controllers/campaignController.js";
 
 const router = express.Router();
@@ -61,6 +62,14 @@ router.post(
   protect,
   allowRoles("ADMIN"),
   rechurnCampaignData
+);
+
+// Set campaign target amount
+router.post(
+  "/:id/set-target",
+  protect,
+  allowRoles("ADMIN"),
+  setCampaignTarget
 );
 
 export default router;

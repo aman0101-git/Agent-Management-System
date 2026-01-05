@@ -7,6 +7,8 @@ import {
   getAgentCaseById,
   submitDisposition,
   getNextCase,
+  searchCustomers,
+  getAgentAnalytics,
 } from '../controllers/agentController.js';
 
 const router = express.Router();
@@ -49,6 +51,26 @@ router.post(
   protect,
   allowRoles('AGENT'),
   submitDisposition
+);
+
+/**
+ * Search customers across entire database (no allocation restriction)
+ */
+router.post(
+  '/search',
+  protect,
+  allowRoles('AGENT'),
+  searchCustomers
+);
+
+/**
+ * Get agent performance analytics with time filtering
+ */
+router.get(
+  '/analytics',
+  protect,
+  allowRoles('AGENT'),
+  getAgentAnalytics
 );
 
 export default router;
