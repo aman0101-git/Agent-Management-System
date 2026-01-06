@@ -9,6 +9,8 @@ import {
   getNextCase,
   searchCustomers,
   getAgentAnalytics,
+  getAgentTarget,
+  setAgentTarget,
 } from '../controllers/agentController.js';
 
 const router = express.Router();
@@ -71,6 +73,26 @@ router.get(
   protect,
   allowRoles('AGENT'),
   getAgentAnalytics
+);
+
+/**
+ * Get agent's monthly target
+ */
+router.get(
+  '/target',
+  protect,
+  allowRoles('AGENT'),
+  getAgentTarget
+);
+
+/**
+ * Set agent's monthly target
+ */
+router.post(
+  '/target',
+  protect,
+  allowRoles('AGENT'),
+  setAgentTarget
 );
 
 export default router;

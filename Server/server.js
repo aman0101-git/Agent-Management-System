@@ -10,6 +10,7 @@ import dataRoutes from "./routes/dataRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import campaignAgentRoutes from "./routes/campaignAgentRoutes.js";
 import agentRoutes from './routes/agentRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
 
 const app = express();
 const port = process.env.PORT || 5000;
@@ -42,6 +43,7 @@ app.use("/api/data", dataRoutes);
 app.use("/api/campaigns", campaignRoutes);
 app.use("/api/campaigns", campaignAgentRoutes);
 app.use('/api/agent', agentRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Start server
 app.listen(port, () => {

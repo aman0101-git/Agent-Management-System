@@ -210,7 +210,7 @@ export const submitDisposition = async (req, res) => {
     } = req.body;
 
     const NEEDS_FOLLOW_UP = ['PTP','BRP','PRT','CBC'];
-    const NEEDS_AMOUNT = ['PTP','BRP','PRT','SIF','PIF'];
+    const NEEDS_AMOUNT = ['PTP','BRP','PRT','SIF','PIF','FCL'];
     const DONE = ['SIF','PIF','FCL'];
     const IN_PROGRESS = ['RTP','TPC','LNB','VOI','RNR','SOW','OOS','WRN'];
 
@@ -253,47 +253,49 @@ export const submitDisposition = async (req, res) => {
     const statusChanged = newStatus !== agentCase.status;
 
     /* ===============================
-       3️⃣ Save edit history if editing
-       =============================== */
+      3️⃣ Save history BEFORE update
+      =============================== */
     if (isEdit) {
-      const [[lastDisposition]] = await conn.query(
+      const [[currentDisposition]] = await conn.query(
         `
-        SELECT *
+        SELECT
+          disposition,
+          remarks,
+          promise_amount,
+          follow_up_date,
+          follow_up_time
         FROM agent_dispositions
         WHERE agent_case_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
+        FOR UPDATE
         `,
         [agentCase.id]
       );
 
-      if (lastDisposition) {
+      if (currentDisposition) {
         await conn.query(
           `
           INSERT INTO agent_dispositions_edit_history
-          (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, edited_at)
+          (
+            agent_case_id,
+            disposition,
+            remarks,
+            promise_amount,
+            follow_up_date,
+            follow_up_time,
+            edited_at
+          )
           VALUES (?, ?, ?, ?, ?, ?, NOW())
           `,
           [
             agentCase.id,
-            lastDisposition.disposition,
-            lastDisposition.remarks,
-            lastDisposition.promise_amount,
-            lastDisposition.follow_up_date,
-            lastDisposition.follow_up_time,
+            currentDisposition.disposition,
+            currentDisposition.remarks,
+            currentDisposition.promise_amount,
+            currentDisposition.follow_up_date,
+            currentDisposition.follow_up_time,
           ]
         );
       }
-
-      await conn.query(
-        `
-        DELETE FROM agent_dispositions
-        WHERE agent_case_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        `,
-        [agentCase.id]
-      );
     }
 
     /* ===============================
@@ -301,85 +303,124 @@ export const submitDisposition = async (req, res) => {
        =============================== */
     let dispositionAmount = null;
 
-    // For RTP (Refuse to Pay), automatically fetch and use last PTP amount
-    if (disposition === 'RTP') {
-      const [[lastPtp]] = await conn.query(
-        `SELECT promise_amount FROM agent_dispositions
-         WHERE agent_case_id = ? AND disposition = 'PTP'
-         ORDER BY created_at DESC LIMIT 1`,
-        [agentCase.id]
-      );
-      
-      if (lastPtp && lastPtp.promise_amount > 0) {
-        dispositionAmount = lastPtp.promise_amount;
-      } else {
-        await conn.rollback();
-        return res.status(400).json({ message: "No PTP amount found to refuse" });
-      }
-    } else if (NEEDS_AMOUNT.includes(disposition)) {
-      dispositionAmount = promiseAmount;
-    }
-
-    await conn.query(
+    // Check if disposition already exists
+    const [[existing]] = await conn.query(
       `
-      INSERT INTO agent_dispositions
-      (agent_case_id, agent_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
+      SELECT id, promise_amount
+      FROM agent_dispositions
+      WHERE agent_case_id = ?
+      FOR UPDATE
       `,
-      [
-        agentCase.id,
-        agentId,
-        disposition,
-        remarks || null,
-        dispositionAmount,
-        NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
-        NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
-      ]
+      [agentCase.id]
     );
 
-    /* ===============================
-       5️⃣ Update agent_case
-       =============================== */
-    if (statusChanged) {
+    if (existing && isEdit) {
+      // EDIT: preserve existing amount unless explicitly changed
+      dispositionAmount = promiseAmount !== undefined && promiseAmount !== null 
+        ? promiseAmount 
+        : existing.promise_amount;
+    } else {
+      // NEW: calculate amount based on disposition type
+      if (disposition === 'RTP') {
+        const [[lastPtp]] = await conn.query(
+          `SELECT promise_amount FROM agent_dispositions
+           WHERE agent_case_id = ? AND disposition = 'PTP'
+           ORDER BY created_at DESC LIMIT 1`,
+          [agentCase.id]
+        );
+        dispositionAmount = lastPtp?.promise_amount ?? 0;
+      }
+      else if (NEEDS_AMOUNT.includes(disposition)) {
+        dispositionAmount = promiseAmount ?? 0;
+      }
+    }
+
+    if (existing) {
+      // UPDATE existing disposition
       await conn.query(
         `
-        UPDATE agent_cases
+        UPDATE agent_dispositions
         SET
-          status = ?,
-          is_active = 0,
-          first_call_at = COALESCE(first_call_at, NOW()),
-          last_call_at = NOW(),
+          disposition = ?,
+          remarks = ?,
+          promise_amount = ?,
           follow_up_date = ?,
-          follow_up_time = ?
-        WHERE id = ?
+          follow_up_time = ?,
+          created_at = NOW()
+        WHERE agent_case_id = ?
         `,
         [
-          newStatus,
+          disposition,
+          remarks || null,
+          dispositionAmount,
           NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
           NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
           agentCase.id,
         ]
       );
+    } else {
+      // INSERT only once (first submission)
+      await conn.query(
+        `
+        INSERT INTO agent_dispositions
+        (agent_case_id, agent_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+        `,
+        [
+          agentCase.id,
+          agentId,
+          disposition,
+          remarks || null,
+          dispositionAmount,
+          NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
+          NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
+        ]
+      );
     }
 
-    await conn.commit();
+        /* ===============================
+          5️⃣ Update agent_case
+          =============================== */
+        if (statusChanged) {
+          await conn.query(
+            `
+            UPDATE agent_cases
+            SET
+              status = ?,
+              is_active = 0,
+              first_call_at = COALESCE(first_call_at, NOW()),
+              last_call_at = NOW(),
+              follow_up_date = ?,
+              follow_up_time = ?
+            WHERE id = ?
+            `,
+            [
+              newStatus,
+              NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
+              NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
+              agentCase.id,
+            ]
+          );
+        }
 
-    const allocateNextOnStatusChange = statusChanged;
-    return res.json({
-      message: "Disposition saved successfully",
-      status: newStatus,
-      allocateNext: statusChanged && newStatus === 'DONE',
-      allocateNextOnStatusChange,
-    });
+        await conn.commit();
 
-  } catch (err) {
-    await conn.rollback();
-    console.error("submitDisposition error:", err);
-    return res.status(500).json({ message: "Failed to submit disposition" });
-  } finally {
-    conn.release();
-  }
-};
+        const allocateNextOnStatusChange = statusChanged;
+        return res.json({
+          message: "Disposition saved successfully",
+          status: newStatus,
+          allocateNext: statusChanged && newStatus === 'DONE',
+          allocateNextOnStatusChange,
+        });
+
+      } catch (err) {
+        await conn.rollback();
+        console.error("submitDisposition error:", err);
+        return res.status(500).json({ message: "Failed to submit disposition" });
+      } finally {
+        conn.release();
+      }
+    };
 
 /**
  * GET /api/agent/cases/next
@@ -490,20 +531,44 @@ export const searchCustomers = async (req, res) => {
       [searchTerm, searchTerm, searchTerm]
     );
 
-    // For each customer, ensure agent_case exists (for inbound calls)
+    // For each customer, check if already assigned to THIS AGENT
+    // Only create case if NOT already assigned to this agent
     const enrichedCustomers = await Promise.all(
       customers.map(async (customer) => {
         const [[existingCase]] = await pool.query(
-          `SELECT id FROM agent_cases WHERE coll_data_id = ? AND agent_id = ? LIMIT 1`,
+          `
+          SELECT id, is_active 
+          FROM agent_cases 
+          WHERE coll_data_id = ? AND agent_id = ? 
+          LIMIT 1
+          `,
           [customer.id, agentId]
         );
 
-        if (!existingCase) {
-          // Create new agent_case for this customer
-          await pool.query(
-            `INSERT INTO agent_cases (agent_id, coll_data_id, status, is_active) VALUES (?, ?, 'NEW', 1)`,
-            [agentId, customer.id]
+        // Only create new case if this agent doesn't have an active case for this customer
+        if (!existingCase || !existingCase.is_active) {
+          // First check: is this customer assigned to ANY agent?
+          const [[assignedToAnyAgent]] = await pool.query(
+            `
+            SELECT id 
+            FROM agent_cases 
+            WHERE coll_data_id = ? AND is_active = 1
+            LIMIT 1
+            `,
+            [customer.id]
           );
+
+          // Only create case if NOT assigned to any other active agent
+          if (!assignedToAnyAgent) {
+            // Create new agent_case for this customer
+            await pool.query(
+              `
+              INSERT INTO agent_cases (agent_id, coll_data_id, status, is_active) 
+              VALUES (?, ?, 'NEW', 1)
+              `,
+              [agentId, customer.id]
+            );
+          }
         }
 
         return customer;
@@ -520,61 +585,73 @@ export const searchCustomers = async (req, res) => {
 /**
  * GET /api/agent/analytics
  * Get performance analytics for logged-in agent with time filtering
- * Query params: timeFilter (today, yesterday, thisWeek, thisMonth)
+ * Query params: timeFilter (today, yesterday, thisWeek, thisMonth, custom)
+ *               fromDate (YYYY-MM-DD) - for custom filter
+ *               toDate (YYYY-MM-DD) - for custom filter
  */
 export const getAgentAnalytics = async (req, res) => {
   try {
     const agentId = req.user.id;
-    const { timeFilter = 'thisMonth' } = req.query;
+    const { timeFilter = 'thisMonth', fromDate, toDate } = req.query;
 
-    // Get agent's campaign from coll_data (agent_id is stored in coll_data)
-    const [[agentData]] = await pool.query(
-      `SELECT DISTINCT campaign_id FROM coll_data WHERE agent_id = ? LIMIT 1`,
-      [agentId]
-    );
+    // ✅ Validate custom date range
+    if (timeFilter === 'custom') {
+      if (!fromDate || !toDate) {
+        return res.status(400).json({ message: "fromDate and toDate required for custom range" });
+      }
 
-    let targetAmount = null;
-    if (agentData?.campaign_id) {
-      const [[campaign]] = await pool.query(
-        `SELECT target_amount FROM campaigns WHERE id = ? AND status = 'ACTIVE'`,
-        [agentData.campaign_id]
-      );
-      targetAmount = campaign?.target_amount || null;
+      // Parse and validate dates
+      const from = new Date(fromDate);
+      const to = new Date(toDate);
+
+      if (isNaN(from.getTime()) || isNaN(to.getTime())) {
+        return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD" });
+      }
+
+      if (from > to) {
+        return res.status(400).json({ message: "fromDate must be <= toDate" });
+      }
     }
 
     // Calculate date range based on timeFilter
     const today = new Date();
-    const startDate = new Date();
-    const endDate = new Date();
+    let startDate = new Date();
+    let endDate = new Date();
 
     endDate.setHours(23, 59, 59, 999);
 
-    switch (timeFilter) {
-      case 'today':
-        startDate.setHours(0, 0, 0, 0);
-        break;
-      case 'yesterday':
-        startDate.setDate(today.getDate() - 1);
-        startDate.setHours(0, 0, 0, 0);
-        endDate.setDate(today.getDate() - 1);
-        endDate.setHours(23, 59, 59, 999);
-        break;
-      case 'thisWeek':
-        startDate.setDate(today.getDate() - today.getDay());
-        startDate.setHours(0, 0, 0, 0);
-        break;
-      case 'thisMonth':
-        startDate.setDate(1);
-        startDate.setHours(0, 0, 0, 0);
-        break;
-      default:
-        startDate.setHours(0, 0, 0, 0);
+    if (timeFilter === 'custom') {
+      startDate = new Date(fromDate);
+      endDate = new Date(toDate);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      switch (timeFilter) {
+        case 'today':
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'yesterday':
+          startDate.setDate(today.getDate() - 1);
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setDate(today.getDate() - 1);
+          endDate.setHours(23, 59, 59, 999);
+          break;
+        case 'thisWeek':
+          startDate.setDate(today.getDate() - today.getDay());
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'thisMonth':
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        default:
+          startDate.setHours(0, 0, 0, 0);
+      }
     }
 
     const startDateStr = startDate.toISOString();
     const endDateStr = endDate.toISOString();
 
-    // Calculate monthly date range (ALWAYS calendar month, independent of filter)
+    // ✅ Calculate monthly date range (ALWAYS calendar month, independent of filter)
     const monthlyStart = new Date();
     monthlyStart.setDate(1);
     monthlyStart.setHours(0, 0, 0, 0);
@@ -586,6 +663,20 @@ export const getAgentAnalytics = async (req, res) => {
 
     const monthlyStartStr = monthlyStart.toISOString();
     const monthlyEndStr = monthlyEnd.toISOString();
+
+    // ✅ Fetch agent target for CURRENT MONTH (not campaign target)
+    const currentMonthStr = monthlyStart.toISOString().substring(0, 7); // YYYY-MM
+    const [[agentTarget]] = await pool.query(
+      `
+      SELECT target_amount 
+      FROM agent_targets 
+      WHERE agent_id = ? AND month = ?
+      LIMIT 1
+      `,
+      [agentId, currentMonthStr]
+    );
+
+    const targetAmount = agentTarget?.target_amount || null;
 
     /* ===============================
        SECTION A: Call & PTP Overview
@@ -739,6 +830,7 @@ export const getAgentAnalytics = async (req, res) => {
         total_collected_amount: collectionSummary.total_collected_amount || 0,
       },
       // Monthly summary (ALWAYS calendar month, independent of filter)
+      // Now using agent_targets instead of campaign targets
       monthlySummary: {
         dateRange: { start: monthlyStartStr, end: monthlyEndStr },
         total_collected_count: monthlySummary.total_collected_count || 0,
@@ -751,5 +843,77 @@ export const getAgentAnalytics = async (req, res) => {
   } catch (err) {
     console.error("getAgentAnalytics error:", err);
     res.status(500).json({ message: "Failed to fetch analytics" });
+  }
+};
+
+/**
+ * GET /api/agent/target
+ * Agent fetches their own monthly target
+ */
+export const getAgentTarget = async (req, res) => {
+  try {
+    const agentId = req.user.id;
+    const { month } = req.query;
+
+    // Use provided month or current month
+    const targetMonth = month || new Date().toISOString().slice(0, 7);
+
+    const [[target]] = await pool.query(
+      `
+      SELECT target_amount
+      FROM agent_targets
+      WHERE agent_id = ? AND month = ?
+      LIMIT 1
+      `,
+      [agentId, targetMonth]
+    );
+
+    res.json({
+      month: targetMonth,
+      target_amount: target?.target_amount || null,
+    });
+
+  } catch (err) {
+    console.error("getAgentTarget error:", err);
+    res.status(500).json({ message: "Failed to fetch target" });
+  }
+};
+
+/**
+ * POST /api/agent/target
+ * Agent sets their own monthly target
+ */
+export const setAgentTarget = async (req, res) => {
+  try {
+    const agentId = req.user.id;
+    const { targetAmount, month } = req.body;
+
+    if (!targetAmount || typeof targetAmount !== 'number' || targetAmount < 0) {
+      return res.status(400).json({ message: "Valid targetAmount required" });
+    }
+
+    const targetMonth = month || new Date().toISOString().slice(0, 7);
+
+    // Insert or update agent's target
+    await pool.query(
+      `
+      INSERT INTO agent_targets (agent_id, month, target_amount, created_at)
+      VALUES (?, ?, ?, NOW())
+      ON DUPLICATE KEY UPDATE
+        target_amount = VALUES(target_amount),
+        updated_at = NOW()
+      `,
+      [agentId, targetMonth, targetAmount]
+    );
+
+    res.json({
+      message: "Target set successfully",
+      month: targetMonth,
+      target_amount: targetAmount,
+    });
+
+  } catch (err) {
+    console.error("setAgentTarget error:", err);
+    res.status(500).json({ message: "Failed to set target" });
   }
 };
