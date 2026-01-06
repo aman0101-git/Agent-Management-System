@@ -17,6 +17,10 @@ const ManageCampaigns = () => {
   const [selectedCampaignId, setSelectedCampaignId] = useState(null);
   const [targetAmount, setTargetAmount] = useState({});
   const [settingTarget, setSettingTarget] = useState({});
+  const [agentTargetAmount, setAgentTargetAmount] = useState({});
+  const [settingAgentTarget, setSettingAgentTarget] = useState({});
+  const [agentTargets, setAgentTargets] = useState({});
+  const [editingAgent, setEditingAgent] = useState(null);
 
   const fetchCampaigns = async () => {
     try {
@@ -51,6 +55,30 @@ const ManageCampaigns = () => {
     return () => {
       mounted = false;
     };
+  }, [token]);
+
+  useEffect(() => {
+    const loadAgentTargets = async () => {
+      try {
+        const month = new Date().toISOString().slice(0, 7);
+
+        const res = await axios.get(
+          `http://localhost:5000/api/admin/agent-targets?month=${month}`,
+          { headers }
+        );
+
+        const map = {};
+        res.data.forEach((row) => {
+          map[row.agent_id] = row.target_amount;
+        });
+
+        setAgentTargets(map);
+      } catch (err) {
+        console.error("Failed to load agent targets", err);
+      }
+    };
+
+    if (token) loadAgentTargets();
   }, [token]);
 
   const toggleCampaign = async (id, status) => {
@@ -131,6 +159,42 @@ const ManageCampaigns = () => {
     setSettingTarget((prev) => ({ ...prev, [campaignId]: false }));
   }
 };
+
+  const handleSetAgentTarget = async (agentId) => {
+    try {
+      const amount = Number(agentTargetAmount[agentId]);
+
+      if (!amount || amount <= 0) {
+        setError("Please enter a valid target amount for agent");
+        return;
+      }
+
+      setSettingAgentTarget((prev) => ({ ...prev, [agentId]: true }));
+
+      const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+
+      await axios.post(
+        `http://localhost:5000/api/admin/agent-targets`,
+        { agentId, month, targetAmount: amount },
+        { headers }
+      );
+
+      // update local state so view mode shows saved target
+      setAgentTargets((prev) => ({ ...prev, [agentId]: amount }));
+
+      // exit edit mode for this agent
+      setEditingAgent(null);
+
+      // refresh campaigns summary and clear errors
+      await fetchCampaigns();
+      setError("");
+    } catch (err) {
+      console.error(err);
+      setError("Failed to set agent target");
+    } finally {
+      setSettingAgentTarget((prev) => ({ ...prev, [agentId]: false }));
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
@@ -221,38 +285,6 @@ const ManageCampaigns = () => {
 
               {expandedId === c.id && summary && (
                 <div className="border-t bg-slate-50 px-4 py-4">
-                  {/* Set Campaign Target */}
-                  <div className="mb-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
-                    <p className="mb-3 text-sm font-semibold text-blue-900">
-                      Set Monthly Collection Target
-                    </p>
-                    <div className="flex gap-2">
-                      <input
-                        type="number"
-                        placeholder="Enter target amount"
-                        value={targetAmount[c.id] || ""}
-                        onChange={(e) =>
-                          setTargetAmount((prev) => ({
-                            ...prev,
-                            [c.id]: e.target.value,
-                          }))
-                        }
-                        className="flex-1 rounded-lg border border-blue-200 bg-white px-3 py-2 text-sm text-slate-900 outline-none focus:border-blue-400"
-                      />
-                      <Button
-                        onClick={() => handleSetTarget(c.id)}
-                        disabled={settingTarget[c.id]}
-                        className="bg-blue-600 text-white hover:bg-blue-700"
-                      >
-                        {settingTarget[c.id] ? "Setting..." : "Set Target"}
-                      </Button>
-                    </div>
-                    {c.target_amount && (
-                      <p className="mt-2 text-xs text-blue-700">
-                        Current Target: ₹{c.target_amount.toLocaleString()}
-                      </p>
-                    )}
-                  </div>
                   <div className="mb-4 grid grid-cols-2 gap-4">
                     <div className="rounded-lg border bg-white p-3">
                       <p className="text-sm text-slate-600">
@@ -323,13 +355,63 @@ const ManageCampaigns = () => {
                               </p>
                             </div>
 
-                            <div className="text-right">
-                              <p className="text-lg font-bold text-indigo-500">
-                                {agent.allocated_count}
-                              </p>
-                              <p className="text-xs text-slate-500">
-                                records allocated
-                              </p>
+                            <div className="text-right flex flex-col items-end gap-2">
+                              <div>
+                                <p className="text-lg font-bold text-indigo-500">
+                                  {agent.allocated_count}
+                                </p>
+                                <p className="text-xs text-slate-500">
+                                  records allocated
+                                </p>
+                              </div>
+
+                              {agentTargets[agent.agent_id] &&
+                              editingAgent !== agent.agent_id ? (
+                                <div className="flex items-center gap-3 bg-purple-50 px-4 py-3 rounded-lg">
+                                  <div>
+                                    <p className="text-xs text-slate-600">Monthly Target</p>
+                                    <p className="text-2xl font-bold text-purple-700">
+                                      ₹{agentTargets[agent.agent_id].toLocaleString("en-IN")}
+                                    </p>
+                                  </div>
+
+                                  <Button
+                                    size="sm"
+                                    className="bg-purple-600 text-white hover:bg-purple-700"
+                                    onClick={() => setEditingAgent(agent.agent_id)}
+                                  >
+                                    Edit Target
+                                  </Button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="number"
+                                    placeholder="Agent target"
+                                    value={
+                                      agentTargetAmount[agent.agent_id] ??
+                                      agentTargets[agent.agent_id] ??
+                                      ""
+                                    }
+                                    onChange={(e) =>
+                                      setAgentTargetAmount((prev) => ({
+                                        ...prev,
+                                        [agent.agent_id]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-36 rounded-lg border border-purple-200 px-2 py-1 text-sm"
+                                  />
+
+                                  <Button
+                                    onClick={() => handleSetAgentTarget(agent.agent_id)}
+                                    disabled={settingAgentTarget[agent.agent_id]}
+                                    className="bg-purple-600 text-white hover:bg-purple-700"
+                                    size="sm"
+                                  >
+                                    {settingAgentTarget[agent.agent_id] ? "Setting..." : "Set Target"}
+                                  </Button>
+                                </div>
+                              )}
                             </div>
                           </div>
                         ))}

@@ -66,14 +66,55 @@ export const searchCustomers = async (query, token) => {
 };
 
 // Fetch agent performance analytics
-export const fetchAnalytics = async (timeFilter, token) => {
+export const fetchAnalytics = async (timeFilter, token, fromDate, toDate) => {
+  const params = { timeFilter };
+  
+  if (timeFilter === 'custom' && fromDate && toDate) {
+    params.fromDate = fromDate;
+    params.toDate = toDate;
+  }
+  
   const res = await axios.get(`${API_BASE}/analytics`, {
-    params: { timeFilter },
+    params,
     headers: {
       Authorization: `Bearer ${token}`,
     },
   });
 
+  return res.data;
+};
+
+// Fetch agent's monthly target
+export const fetchAgentTarget = async (token) => {
+  try {
+    const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+    const res = await axios.get(`${API_BASE}/target`, {
+      params: { month: currentMonth },
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    });
+    return res.data;
+  } catch (error) {
+    return null; // If no target found, return null
+  }
+};
+
+// Update agent's monthly target
+export const updateAgentTarget = async (targetAmount, token) => {
+  const currentMonth = new Date().toISOString().slice(0, 7); // YYYY-MM
+  const res = await axios.post(
+    `${API_BASE}/target`,
+    { 
+      month: currentMonth, 
+      targetAmount 
+    },
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    }
+  );
   return res.data;
 };
 

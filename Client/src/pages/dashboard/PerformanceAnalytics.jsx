@@ -1,30 +1,68 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
-import { fetchAnalytics } from "@/api/agentApi";
+import { fetchAnalytics, fetchAgentTarget, updateAgentTarget } from "@/api/agentApi";
 import { Button } from "@/components/ui/button";
 
 const PerformanceAnalytics = () => {
   const { token } = useAuth();
 
   const [timeFilter, setTimeFilter] = useState("thisMonth");
+  const [customFromDate, setCustomFromDate] = useState("");
+  const [customToDate, setCustomToDate] = useState("");
   const [analytics, setAnalytics] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [agentTarget, setAgentTarget] = useState(null);
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [targetInput, setTargetInput] = useState("");
+  const [savingTarget, setSavingTarget] = useState(false);
+
 
   useEffect(() => {
-    const loadAnalytics = async () => {
+    const loadData = async () => {
       setLoading(true);
       try {
-        const data = await fetchAnalytics(timeFilter, token);
+        // Fetch analytics
+        const data = await fetchAnalytics(
+          timeFilter,
+          token,
+          timeFilter === "custom" ? customFromDate : undefined,
+          timeFilter === "custom" ? customToDate : undefined
+        );
         setAnalytics(data);
+
+        // Fetch agent target
+        const target = await fetchAgentTarget(token);
+        setAgentTarget(target?.target_amount || null);
+        setTargetInput(target?.target_amount ? String(target.target_amount) : "");
       } catch (error) {
-        console.error("Failed to fetch analytics:", error);
+        console.error("Failed to fetch data:", error);
       } finally {
         setLoading(false);
       }
     };
 
-    loadAnalytics();
-  }, [timeFilter, token]);
+    loadData();
+  }, [timeFilter, token, customFromDate, customToDate]);
+
+  const handleSaveTarget = async () => {
+    const amount = Number(targetInput);
+    if (!amount || amount <= 0) {
+      alert("Please enter a valid target amount");
+      return;
+    }
+
+    setSavingTarget(true);
+    try {
+      await updateAgentTarget(amount, token);
+      setAgentTarget(amount);
+      setEditingTarget(false);
+    } catch (error) {
+      console.error("Failed to save target:", error);
+      alert("Failed to save target");
+    } finally {
+      setSavingTarget(false);
+    }
+  };
 
   const formatCurrency = (amount) => {
     if (!amount) return "₹0";
@@ -71,13 +109,63 @@ const PerformanceAnalytics = () => {
           </p>
         </div>
 
+        {/* Agent Target Section */}
+        <div className="bg-gradient-to-r from-purple-50 to-blue-50 rounded-lg shadow-md p-6 mb-8 border border-purple-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-purple-700 mb-2">Monthly Target</p>
+              {editingTarget ? (
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    value={targetInput}
+                    onChange={(e) => setTargetInput(e.target.value)}
+                    placeholder="Enter target amount"
+                    className="w-40 px-3 py-2 border border-purple-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-purple-500"
+                  />
+                  <Button
+                    onClick={handleSaveTarget}
+                    disabled={savingTarget}
+                    className="bg-purple-600 hover:bg-purple-700 text-white"
+                    size="sm"
+                  >
+                    {savingTarget ? "Saving..." : "Save"}
+                  </Button>
+                  <Button
+                    onClick={() => {
+                      setEditingTarget(false);
+                      setTargetInput(agentTarget ? String(agentTarget) : "");
+                    }}
+                    className="bg-slate-300 hover:bg-slate-400 text-slate-900"
+                    size="sm"
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              ) : (
+                <div className="flex items-center gap-4">
+                  <p className="text-4xl font-bold text-purple-900">
+                    {agentTarget
+                      ? new Intl.NumberFormat("en-IN", {
+                          style: "currency",
+                          currency: "INR",
+                          maximumFractionDigits: 0,
+                        }).format(agentTarget)
+                      : "Not Set"}
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
         {/* Time Filter */}
         <div className="bg-white rounded-lg shadow-md p-4 mb-8">
           <p className="text-sm font-medium text-slate-700 mb-3">
             Time Period
           </p>
           <div className="flex gap-2 flex-wrap">
-            {["today", "yesterday", "thisWeek", "thisMonth"].map((filter) => (
+            {["today", "yesterday", "thisWeek", "thisMonth", "custom"].map((filter) => (
               <Button
                 key={filter}
                 onClick={() => setTimeFilter(filter)}
@@ -93,10 +181,40 @@ const PerformanceAnalytics = () => {
                   ? "Yesterday"
                   : filter === "thisWeek"
                   ? "This Week"
-                  : "This Month"}
+                  : filter === "thisMonth"
+                  ? "This Month"
+                  : "Custom"}
               </Button>
             ))}
           </div>
+
+          {/* Custom Date Range Inputs */}
+          {timeFilter === "custom" && (
+            <div className="mt-4 flex gap-3">
+              <div className="flex-1">
+                <label className="text-xs font-medium text-slate-600 mb-1 block">
+                  From Date
+                </label>
+                <input
+                  type="date"
+                  value={customFromDate}
+                  onChange={(e) => setCustomFromDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+              </div>
+              <div className="flex-1">
+                <label className="text-xs font-medium text-slate-600 mb-1 block">
+                  To Date
+                </label>
+                <input
+                  type="date"
+                  value={customToDate}
+                  onChange={(e) => setCustomToDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* SECTION A: Call & PTP Overview */}
@@ -204,22 +322,22 @@ const PerformanceAnalytics = () => {
             {[
               {
                 key: "PIF",
-                label: "PIF (Partial in Full)",
+                label: "PIF (Paid in Full)",
                 color: "blue",
               },
               {
                 key: "SIF",
-                label: "SIF (Settlement in Full)",
+                label: "SIF (Settle in Full)",
                 color: "green",
               },
               {
                 key: "FCL",
-                label: "FCL (Final Clearance)",
+                label: "FCL (Forclosure)",
                 color: "purple",
               },
               {
                 key: "PRT",
-                label: "PRT (Payment Received Today)",
+                label: "PRT (Part Payment)",
                 color: "orange",
               },
             ].map(({ key, label, color }) => {
@@ -418,7 +536,7 @@ const PerformanceAnalytics = () => {
                         </div>
                       </div>
                       <p className="text-2xl font-bold text-slate-900 min-w-fit">
-                        {monthlySummary.achievement_percent
+                        {monthlySummary.achievement_percent != null
                           ? monthlySummary.achievement_percent.toFixed(1)
                           : 0}
                         %
@@ -445,6 +563,15 @@ const PerformanceAnalytics = () => {
                         <span className="text-slate-700">Collected (Actual):</span>
                         <span className="font-semibold text-green-700">
                           {formatCurrency(monthlySummary.total_collected_amount)}
+                        </span>
+                      </div>
+                      <div className="flex justify-between border-t pt-2">
+                        <span className="text-slate-700">Achievement %:</span>
+                        <span className="font-semibold text-blue-700">
+                          {monthlySummary.achievement_percent != null
+                            ? monthlySummary.achievement_percent.toFixed(1)
+                            : 0}
+                          %
                         </span>
                       </div>
                     </div>
