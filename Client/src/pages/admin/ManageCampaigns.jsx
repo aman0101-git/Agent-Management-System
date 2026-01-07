@@ -162,7 +162,7 @@ const ManageCampaigns = () => {
 
   const handleSetAgentTarget = async (agentId) => {
     try {
-      const amount = Number(agentTargetAmount[agentId]);
+      const amount = Number(agentTargets[agentId]);
 
       if (!amount || amount <= 0) {
         setError("Please enter a valid target amount for agent");
@@ -172,6 +172,7 @@ const ManageCampaigns = () => {
       setSettingAgentTarget((prev) => ({ ...prev, [agentId]: true }));
 
       const month = new Date().toISOString().slice(0, 7); // YYYY-MM
+
 
       await axios.post(
         `http://localhost:5000/api/admin/agent-targets`,
@@ -185,8 +186,6 @@ const ManageCampaigns = () => {
       // exit edit mode for this agent
       setEditingAgent(null);
 
-      // refresh campaigns summary and clear errors
-      await fetchCampaigns();
       setError("");
     } catch (err) {
       console.error(err);
@@ -365,53 +364,48 @@ const ManageCampaigns = () => {
                                 </p>
                               </div>
 
-                              {agentTargets[agent.agent_id] &&
-                              editingAgent !== agent.agent_id ? (
-                                <div className="flex items-center gap-3 bg-purple-50 px-4 py-3 rounded-lg">
-                                  <div>
-                                    <p className="text-xs text-slate-600">Monthly Target</p>
-                                    <p className="text-2xl font-bold text-purple-700">
-                                      ₹{agentTargets[agent.agent_id].toLocaleString("en-IN")}
-                                    </p>
-                                  </div>
-
-                                  <Button
-                                    size="sm"
-                                    className="bg-purple-600 text-white hover:bg-purple-700"
-                                    onClick={() => setEditingAgent(agent.agent_id)}
-                                  >
-                                    Edit Target
-                                  </Button>
+                            {editingAgent !== agent.agent_id ? (
+                              <div className="flex items-center gap-3 bg-purple-50 px-4 py-3 rounded-lg">
+                                <div>
+                                  <p className="text-xs text-slate-600">Monthly Target</p>
+                                  <p className="text-2xl font-bold text-purple-700">
+                                    ₹{(agentTargets[agent.agent_id] ?? 0).toLocaleString("en-IN")}
+                                  </p>
                                 </div>
-                              ) : (
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="number"
-                                    placeholder="Agent target"
-                                    value={
-                                      agentTargetAmount[agent.agent_id] ??
-                                      agentTargets[agent.agent_id] ??
-                                      ""
-                                    }
-                                    onChange={(e) =>
-                                      setAgentTargetAmount((prev) => ({
-                                        ...prev,
-                                        [agent.agent_id]: e.target.value,
-                                      }))
-                                    }
-                                    className="w-36 rounded-lg border border-purple-200 px-2 py-1 text-sm"
-                                  />
 
-                                  <Button
-                                    onClick={() => handleSetAgentTarget(agent.agent_id)}
-                                    disabled={settingAgentTarget[agent.agent_id]}
-                                    className="bg-purple-600 text-white hover:bg-purple-700"
-                                    size="sm"
-                                  >
-                                    {settingAgentTarget[agent.agent_id] ? "Setting..." : "Set Target"}
-                                  </Button>
-                                </div>
-                              )}
+                                <Button
+                                  size="sm"
+                                  className="bg-purple-600 text-white hover:bg-purple-700"
+                                  onClick={() => setEditingAgent(agent.agent_id)}
+                                >
+                                  Edit Target
+                                </Button>
+                              </div>
+                            ) : (
+                              <div className="flex items-center gap-2">
+                                <input
+                                  type="number"
+                                  value={agentTargets[agent.agent_id] ?? ""}
+                                  onChange={(e) =>
+                                    setAgentTargets((prev) => ({
+                                      ...prev,
+                                      [agent.agent_id]: e.target.value,
+                                    }))
+                                  }
+                                  className="w-36 rounded-lg border border-purple-200 px-2 py-1 text-sm"
+                                />
+
+                                <Button
+                                  onClick={() => handleSetAgentTarget(agent.agent_id)}
+                                  disabled={settingAgentTarget[agent.agent_id]}
+                                  className="bg-purple-600 text-white hover:bg-purple-700"
+                                  size="sm"
+                                >
+                                  {settingAgentTarget[agent.agent_id] ? "Setting..." : "Set Target"}
+                                </Button>
+                              </div>
+                            )}
+
                             </div>
                           </div>
                         ))}
