@@ -64,7 +64,11 @@ export const login = async (req, res) => {
     }
 
     // Generate token
-    const token = jwt.sign({ id: user.id, role: user.role }, JWT_SECRET, { expiresIn: '24h' });
+   const token = jwt.sign(
+     { id: user.id, role: user.role, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }, 
+     JWT_SECRET, 
+     { expiresIn: '24h' }
+   );
 
     // Role-based redirect path for frontend
     const redirectTo = user.role === 'ADMIN' ? '/admin/dashboard' : '/agent/dashboard';
@@ -73,6 +77,7 @@ export const login = async (req, res) => {
       success: true,
       token,
       redirectTo,
+     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
       user: {
         id: user.id,
         firstName: user.firstName,
@@ -88,5 +93,7 @@ export const login = async (req, res) => {
 
 // LOGOUT
 export const logout = (req, res) => {
+  // Token is removed on client-side via localStorage.removeItem
+  // This endpoint confirms logout on server-side if needed
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 };

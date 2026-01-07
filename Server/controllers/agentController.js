@@ -469,7 +469,6 @@ export const searchCustomers = async (req, res) => {
         OR LOWER(cust_name) LIKE LOWER(?)
         OR mobileno LIKE ?
       )
-      AND is_active = 1
       ORDER BY id DESC
       LIMIT 50
       `,
@@ -484,7 +483,7 @@ export const searchCustomers = async (req, res) => {
           `
           SELECT id, is_active 
           FROM agent_cases 
-          WHERE coll_data_id = ? AND agent_id = ? 
+          WHERE coll_data_id = ?
           LIMIT 1
           `,
           [customer.id, agentId]
@@ -497,7 +496,7 @@ export const searchCustomers = async (req, res) => {
             `
             SELECT id 
             FROM agent_cases 
-            WHERE coll_data_id = ? AND is_active = 1
+            WHERE coll_data_id = ? 
             LIMIT 1
             `,
             [customer.id]
@@ -508,7 +507,7 @@ export const searchCustomers = async (req, res) => {
             // Create new agent_case for this customer
             await pool.query(
               `
-              INSERT INTO agent_cases (agent_id, coll_data_id, status, is_active) 
+              INSERT INTO agent_cases (agent_id, coll_data_id, status) 
               VALUES (?, ?, 'NEW', 1)
               `,
               [agentId, customer.id]
