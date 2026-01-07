@@ -252,131 +252,76 @@ export const submitDisposition = async (req, res) => {
 
     const statusChanged = newStatus !== agentCase.status;
 
-    /* ===============================
-      3️⃣ Save history BEFORE update
-      =============================== */
+    /* 3️⃣ Save edit history (if edit) */
     if (isEdit) {
-      const [[currentDisposition]] = await conn.query(
+      const [[latest]] = await conn.query(
         `
-        SELECT
-          disposition,
-          remarks,
-          promise_amount,
-          follow_up_date,
-          follow_up_time
+        SELECT disposition, remarks, promise_amount, follow_up_date, follow_up_time
         FROM agent_dispositions
         WHERE agent_case_id = ?
+        ORDER BY created_at DESC
+        LIMIT 1
         FOR UPDATE
         `,
         [agentCase.id]
       );
 
-      if (currentDisposition) {
+      if (latest) {
         await conn.query(
           `
           INSERT INTO agent_dispositions_edit_history
-          (
-            agent_case_id,
-            disposition,
-            remarks,
-            promise_amount,
-            follow_up_date,
-            follow_up_time,
-            edited_at
-          )
-          VALUES (?, ?, ?, ?, ?, ?, NOW())
+          (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
+          VALUES (?, ?, ?, ?, ?, ?)
           `,
           [
             agentCase.id,
-            currentDisposition.disposition,
-            currentDisposition.remarks,
-            currentDisposition.promise_amount,
-            currentDisposition.follow_up_date,
-            currentDisposition.follow_up_time,
+            latest.disposition,
+            latest.remarks,
+            latest.promise_amount,
+            latest.follow_up_date,
+            latest.follow_up_time,
           ]
         );
       }
     }
 
     /* ===============================
-       4️⃣ Insert new disposition
-       =============================== */
+   4️⃣ Insert new disposition (INSERT ONLY)
+   =============================== */
+
     let dispositionAmount = null;
 
-    // Check if disposition already exists
-    const [[existing]] = await conn.query(
+    // Only PTP / BRP / PRT / SIF / PIF / FCL carry amounts
+    if (['PTP','BRP','PRT','SIF','PIF','FCL'].includes(disposition)) {
+      if (promiseAmount === undefined || promiseAmount === null) {
+        return res.status(400).json({
+          message: "Promise amount required for this disposition"
+        });
+      }
+      dispositionAmount = promiseAmount;
+    }
+
+    // RTP explicitly cancels promise → store NO amount
+    if (disposition === 'RTP') {
+      dispositionAmount = null;
+    }
+
+    await conn.query(
       `
-      SELECT id, promise_amount
-      FROM agent_dispositions
-      WHERE agent_case_id = ?
-      FOR UPDATE
+      INSERT INTO agent_dispositions
+      (agent_case_id, agent_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
       `,
-      [agentCase.id]
+      [
+        agentCase.id,
+        agentId,
+        disposition,
+        remarks || null,
+        dispositionAmount,
+        NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
+        NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
+      ]
     );
-
-    if (existing && isEdit) {
-      // EDIT: preserve existing amount unless explicitly changed
-      dispositionAmount = promiseAmount !== undefined && promiseAmount !== null 
-        ? promiseAmount 
-        : existing.promise_amount;
-    } else {
-      // NEW: calculate amount based on disposition type
-      if (disposition === 'RTP') {
-        const [[lastPtp]] = await conn.query(
-          `SELECT promise_amount FROM agent_dispositions
-           WHERE agent_case_id = ? AND disposition = 'PTP'
-           ORDER BY created_at DESC LIMIT 1`,
-          [agentCase.id]
-        );
-        dispositionAmount = lastPtp?.promise_amount ?? 0;
-      }
-      else if (NEEDS_AMOUNT.includes(disposition)) {
-        dispositionAmount = promiseAmount ?? 0;
-      }
-    }
-
-    if (existing) {
-      // UPDATE existing disposition
-      await conn.query(
-        `
-        UPDATE agent_dispositions
-        SET
-          disposition = ?,
-          remarks = ?,
-          promise_amount = ?,
-          follow_up_date = ?,
-          follow_up_time = ?,
-          created_at = NOW()
-        WHERE agent_case_id = ?
-        `,
-        [
-          disposition,
-          remarks || null,
-          dispositionAmount,
-          NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
-          NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
-          agentCase.id,
-        ]
-      );
-    } else {
-      // INSERT only once (first submission)
-      await conn.query(
-        `
-        INSERT INTO agent_dispositions
-        (agent_case_id, agent_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
-        `,
-        [
-          agentCase.id,
-          agentId,
-          disposition,
-          remarks || null,
-          dispositionAmount,
-          NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
-          NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
-        ]
-      );
-    }
 
         /* ===============================
           5️⃣ Update agent_case
@@ -684,22 +629,45 @@ export const getAgentAnalytics = async (req, res) => {
     /* ===============================
        SECTION A: Call & PTP Overview
        =============================== */
-    const [[ptpData]] = await pool.query(
-      `
-      SELECT
-        COUNT(ad.id) AS calls_attended,
-        COUNT(DISTINCT CASE WHEN ad.disposition = 'PTP' THEN ad.agent_case_id END) AS ptp_count,
-        (
-          COALESCE(SUM(CASE WHEN ad.disposition = 'PTP' THEN ad.promise_amount ELSE 0 END),0)
-          -
-          COALESCE(SUM(CASE WHEN ad.disposition = 'RTP' THEN ad.promise_amount ELSE 0 END),0)
-        ) AS total_ptp_amount
-      FROM agent_dispositions ad
-      WHERE ad.agent_id = ?
-        AND ad.created_at BETWEEN ? AND ?
-      `,
-      [agentId, startDateStr, endDateStr]
-    );
+        const [[ptpData]] = await pool.query(
+        `
+        SELECT
+          /* Calls attended = total disposition events */
+          COUNT(ad_all.id) AS calls_attended,
+
+          /* PTP customers = cases whose LATEST disposition is PTP */
+          COUNT(DISTINCT CASE WHEN latest.disposition = 'PTP' THEN latest.agent_case_id END) AS ptp_count,
+
+          /* Total PTP amount = sum of promise_amount ONLY if latest disposition is PTP */
+          COALESCE(SUM(CASE WHEN latest.disposition = 'PTP' THEN latest.promise_amount ELSE 0 END), 0)
+            AS total_ptp_amount
+
+        FROM agent_dispositions ad_all
+
+        /* Reduce to LATEST disposition per case */
+        LEFT JOIN (
+          SELECT ad.*
+          FROM agent_dispositions ad
+          JOIN (
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions
+            WHERE agent_id = ?
+              AND created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) x
+            ON x.agent_case_id = ad.agent_case_id
+          AND x.latest_time = ad.created_at
+        ) latest
+          ON latest.agent_case_id = ad_all.agent_case_id
+
+        WHERE ad_all.agent_id = ?
+          AND ad_all.created_at BETWEEN ? AND ?
+        `,
+        [
+          agentId, startDateStr, endDateStr, // for latest subquery
+          agentId, startDateStr, endDateStr  // for calls_attended
+        ]
+      );
 
     /* ===============================
        SECTION B: Collection Breakdown
