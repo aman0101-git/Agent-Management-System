@@ -77,7 +77,7 @@ export const getAgentTargets = async (req, res) => {
 
     // Verify agent exists
     const [[agent]] = await pool.query(
-      `SELECT id, name FROM users WHERE id = ? AND role = 'AGENT'`,
+      `SELECT id, firstName, lastName FROM users WHERE id = ? AND role = 'AGENT'`,
       [agentId]
     );
 
@@ -106,7 +106,7 @@ export const getAgentTargets = async (req, res) => {
     res.json({ 
       agent: {
         id: agent.id,
-        name: agent.name,
+        name: `${agent.firstName} ${agent.lastName}`,
       },
       targets: targets,
       count: targets.length 
@@ -130,7 +130,7 @@ export const getAllAgentTargets = async (req, res) => {
       SELECT
         at.id,
         at.agent_id,
-        u.name AS agent_name,
+        CONCAT(u.firstName, ' ', u.lastName) AS agent_name,
         at.month,
         at.target_amount,
         at.created_at,
@@ -151,7 +151,7 @@ export const getAllAgentTargets = async (req, res) => {
       params.push(month);
     }
 
-    query += ` ORDER BY at.month DESC, u.name ASC`;
+    query += ` ORDER BY at.month DESC, CONCAT(u.firstName, ' ', u.lastName) ASC`;
 
     const [targets] = await pool.query(query, params);
 
@@ -162,7 +162,7 @@ export const getAllAgentTargets = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("getAllAgentTargets error:", err);
+    console.error("getAllAgentTargets error:", err.message, err.stack);
     res.status(500).json({ message: "Failed to fetch targets" });
   }
 };

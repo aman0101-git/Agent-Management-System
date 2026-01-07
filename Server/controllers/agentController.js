@@ -665,7 +665,10 @@ export const getAgentAnalytics = async (req, res) => {
     const monthlyEndStr = monthlyEnd.toISOString();
 
     // ✅ Fetch agent target for CURRENT MONTH (not campaign target)
-    const currentMonthStr = monthlyStart.toISOString().substring(0, 7); // YYYY-MM
+    // Build YYYY-MM from local date components to avoid timezone shifts
+    const currentMonthStr = `${monthlyStart.getFullYear()}-${String(
+      monthlyStart.getMonth() + 1
+    ).padStart(2, '0')}`; // YYYY-MM
     const [[agentTarget]] = await pool.query(
       `
       SELECT target_amount 
@@ -894,16 +897,16 @@ export const setAgentTarget = async (req, res) => {
 
     const targetMonth = month || new Date().toISOString().slice(0, 7);
 
-    // Insert or update agent's target
+    // Insert or update agent's target (include created_by so NOT NULL constraint satisfied)
     await pool.query(
       `
-      INSERT INTO agent_targets (agent_id, month, target_amount, created_at)
-      VALUES (?, ?, ?, NOW())
+      INSERT INTO agent_targets (agent_id, month, target_amount, created_by, created_at)
+      VALUES (?, ?, ?, ?, NOW())
       ON DUPLICATE KEY UPDATE
         target_amount = VALUES(target_amount),
         updated_at = NOW()
       `,
-      [agentId, targetMonth, targetAmount]
+      [agentId, targetMonth, targetAmount, agentId]
     );
 
     res.json({
@@ -913,7 +916,7 @@ export const setAgentTarget = async (req, res) => {
     });
 
   } catch (err) {
-    console.error("setAgentTarget error:", err);
+    console.error("setAgentTarget error:", err && err.message, err && err.stack);
     res.status(500).json({ message: "Failed to set target" });
   }
 };
