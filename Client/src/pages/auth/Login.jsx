@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/form";
 
 const Login = () => {
-  const { login, loading, error } = useAuth();
+  const { login: authLogin, authLoading, error } = useAuth();
   const navigate = useNavigate();
 
   const form = useForm({
@@ -26,14 +26,11 @@ const Login = () => {
   });
 
   const onSubmit = async ({ username, password }) => {
-    const success = await login(username, password);
+    const success = await authLogin(username, password);
     if (success) {
-      const savedUser = JSON.parse(localStorage.getItem("user"));
-      navigate(
-        savedUser.role === "ADMIN"
-          ? "/admin/dashboard"
-          : "/agent/dashboard"
-      );
+      const savedUser = JSON.parse(localStorage.getItem("authUser"));
+      if (savedUser?.role === "ADMIN") navigate("/admin/dashboard");
+      else navigate("/agent/dashboard");
     }
   };
 
@@ -106,10 +103,10 @@ const Login = () => {
 
               <Button
                 type="submit"
-                disabled={loading}
+                disabled={authLoading}
                 className="w-full bg-gradient-to-r from-teal-600 to-indigo-600 text-white shadow-md hover:shadow-lg hover:from-teal-700 hover:to-indigo-700 active:scale-[0.98] transition-all duration-200"
               >
-                {loading ? "Signing in..." : "Sign in"}
+                {authLoading ? "Signing in..." : "Sign in"}
               </Button>
             </form>
           </Form>
