@@ -9,6 +9,7 @@ import CreateUser from "./pages/admin/CreateUser";
 import UploadData from "./pages/admin/UploadData";
 import ManageCampaigns from "./pages/admin/ManageCampaigns";
 import CampaignAgents from "./pages/admin/CampaignAgents";
+import MonitoringAnalytics from "./pages/admin/MonitoringAnalytics";
 
 function App() {
   return (
@@ -88,6 +89,14 @@ function App() {
         }
       />
 
+      <Route
+        path="/admin/monitoring-analytics"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <MonitoringAnalytics />
+          </ProtectedRoute>
+        }
+      />
 
     </Routes>
   );

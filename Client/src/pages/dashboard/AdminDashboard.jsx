@@ -89,17 +89,13 @@ const AdminDashboard = () => {
           ))}
 
           {/* Disabled Card */}
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
-            <h2 className="text-lg font-semibold text-slate-700">
-              Monitoring
-            </h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Track agent performance and activity.
-            </p>
+          <div className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg">
+            <h2 className="text-lg font-semibold text-slate-900">Monitoring</h2>
+            <p className="mt-2 text-sm text-slate-600">Track agent performance and activity.</p>
 
-            <Button disabled className="mt-5 w-full">
-              Coming Soon
-            </Button>
+            <Link to="/admin/monitoring-analytics">
+              <Button className="mt-5 w-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white">Open Monitoring</Button>
+            </Link>
           </div>
         </div>
       </main>
