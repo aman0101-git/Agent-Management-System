@@ -197,9 +197,11 @@ export const getAgentCaseById = async (req, res) => {
  */
 export const submitDisposition = async (req, res) => {
   const conn = await pool.getConnection();
+
   try {
     const agentId = req.user.id;
     const { caseId } = req.params;
+
     const {
       disposition,
       remarks,
@@ -209,10 +211,19 @@ export const submitDisposition = async (req, res) => {
       isEdit,
     } = req.body;
 
-    const NEEDS_FOLLOW_UP = ['PTP','BRP','PRT','CBC'];
-    const NEEDS_AMOUNT = ['PTP','BRP','PRT','SIF','PIF','FCL'];
-    const DONE = ['SIF','PIF','FCL'];
-    const IN_PROGRESS = ['RTP','TPC','LNB','VOI','RNR','SOW','OOS','WRN'];
+    const NEEDS_FOLLOW_UP = ['PTP', 'BRP', 'PRT', 'CBC'];
+    const NEEDS_AMOUNT = ['PTP', 'BRP', 'PRT', 'SIF', 'PIF', 'FCL'];
+    const DONE = ['SIF', 'PIF', 'FCL'];
+    const IN_PROGRESS = [
+      'RTP',
+      'TPC',
+      'LNB',
+      'VOI',
+      'RNR',
+      'SOW',
+      'OOS',
+      'WRN',
+    ];
 
     if (!disposition) {
       return res.status(400).json({ message: "Disposition required" });
@@ -246,17 +257,28 @@ export const submitDisposition = async (req, res) => {
        =============================== */
     let newStatus = agentCase.status;
 
-    if (NEEDS_FOLLOW_UP.includes(disposition)) newStatus = 'FOLLOW_UP';
-    else if (IN_PROGRESS.includes(disposition)) newStatus = 'IN_PROGRESS';
-    else if (DONE.includes(disposition)) newStatus = 'DONE';
+    if (NEEDS_FOLLOW_UP.includes(disposition)) {
+      newStatus = 'FOLLOW_UP';
+    } else if (IN_PROGRESS.includes(disposition)) {
+      newStatus = 'IN_PROGRESS';
+    } else if (DONE.includes(disposition)) {
+      newStatus = 'DONE';
+    }
 
     const statusChanged = newStatus !== agentCase.status;
 
-    /* 3️⃣ Save edit history (if edit) */
+    /* ===============================
+       3️⃣ Save edit history (if edit)
+       =============================== */
     if (isEdit) {
       const [[latest]] = await conn.query(
         `
-        SELECT disposition, remarks, promise_amount, follow_up_date, follow_up_time
+        SELECT
+          disposition,
+          remarks,
+          promise_amount,
+          follow_up_date,
+          follow_up_time
         FROM agent_dispositions
         WHERE agent_case_id = ?
         ORDER BY created_at DESC
@@ -270,7 +292,14 @@ export const submitDisposition = async (req, res) => {
         await conn.query(
           `
           INSERT INTO agent_dispositions_edit_history
-          (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time)
+          (
+            agent_case_id,
+            disposition,
+            remarks,
+            promise_amount,
+            follow_up_date,
+            follow_up_time
+          )
           VALUES (?, ?, ?, ?, ?, ?)
           `,
           [
@@ -286,22 +315,21 @@ export const submitDisposition = async (req, res) => {
     }
 
     /* ===============================
-   4️⃣ Insert new disposition (INSERT ONLY)
-   =============================== */
-
+       4️⃣ Insert new disposition
+       =============================== */
     let dispositionAmount = null;
 
-    // Only PTP / BRP / PRT / SIF / PIF / FCL carry amounts
-    if (['PTP','BRP','PRT','SIF','PIF','FCL'].includes(disposition)) {
+    // Only specific dispositions carry amount
+    if (NEEDS_AMOUNT.includes(disposition)) {
       if (promiseAmount === undefined || promiseAmount === null) {
         return res.status(400).json({
-          message: "Promise amount required for this disposition"
+          message: "Promise amount required for this disposition",
         });
       }
       dispositionAmount = promiseAmount;
     }
 
-    // RTP explicitly cancels promise → store NO amount
+    // RTP explicitly cancels promise
     if (disposition === 'RTP') {
       dispositionAmount = null;
     }
@@ -309,7 +337,16 @@ export const submitDisposition = async (req, res) => {
     await conn.query(
       `
       INSERT INTO agent_dispositions
-      (agent_case_id, agent_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, created_at)
+      (
+        agent_case_id,
+        agent_id,
+        disposition,
+        remarks,
+        promise_amount,
+        follow_up_date,
+        follow_up_time,
+        created_at
+      )
       VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
@@ -323,49 +360,50 @@ export const submitDisposition = async (req, res) => {
       ]
     );
 
-        /* ===============================
-          5️⃣ Update agent_case
-          =============================== */
-        if (statusChanged) {
-          await conn.query(
-            `
-            UPDATE agent_cases
-            SET
-              status = ?,
-              is_active = 0,
-              first_call_at = COALESCE(first_call_at, NOW()),
-              last_call_at = NOW(),
-              follow_up_date = ?,
-              follow_up_time = ?
-            WHERE id = ?
-            `,
-            [
-              newStatus,
-              NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
-              NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
-              agentCase.id,
-            ]
-          );
-        }
+    /* ===============================
+       5️⃣ Update agent_case
+       =============================== */
+    if (statusChanged) {
+      await conn.query(
+        `
+        UPDATE agent_cases
+        SET
+          status = ?,
+          is_active = 0,
+          first_call_at = COALESCE(first_call_at, NOW()),
+          last_call_at = NOW(),
+          follow_up_date = ?,
+          follow_up_time = ?
+        WHERE id = ?
+        `,
+        [
+          newStatus,
+          NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
+          NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
+          agentCase.id,
+        ]
+      );
+    }
 
-        await conn.commit();
+    await conn.commit();
 
-        const allocateNextOnStatusChange = statusChanged;
-        return res.json({
-          message: "Disposition saved successfully",
-          status: newStatus,
-          allocateNext: statusChanged && newStatus === 'DONE',
-          allocateNextOnStatusChange,
-        });
+    return res.json({
+      message: "Disposition saved successfully",
+      status: newStatus,
+      allocateNext: statusChanged && newStatus === 'DONE',
+      allocateNextOnStatusChange: statusChanged,
+    });
 
-      } catch (err) {
-        await conn.rollback();
-        console.error("submitDisposition error:", err);
-        return res.status(500).json({ message: "Failed to submit disposition" });
-      } finally {
-        conn.release();
-      }
-    };
+  } catch (err) {
+    await conn.rollback();
+    console.error("submitDisposition error:", err);
+    return res.status(500).json({
+      message: "Failed to submit disposition",
+    });
+  } finally {
+    conn.release();
+  }
+};
 
 /**
  * GET /api/agent/cases/next

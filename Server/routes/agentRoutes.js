@@ -12,6 +12,11 @@ import {
   getAgentTarget,
   setAgentTarget,
 } from '../controllers/agentController.js';
+import {
+  startCustomerVisit,
+  endCustomerVisit,
+  getCustomerVisitHistory,
+} from '../controllers/agentCustomerVisitController.js';
 
 const router = express.Router();
 
@@ -63,6 +68,30 @@ router.post(
   protect,
   allowRoles('AGENT'),
   searchCustomers
+);
+
+/**
+ * Agent-Customer Visit Tracking
+ */
+router.post(
+  '/customer-visit/start',
+  protect,
+  allowRoles('AGENT'),
+  startCustomerVisit
+);
+
+router.post(
+  '/customer-visit/end',
+  protect,
+  allowRoles('AGENT'),
+  endCustomerVisit
+);
+
+router.get(
+  '/customer-visit/history/:customer_id',
+  protect,
+  allowRoles('AGENT'),
+  getCustomerVisitHistory
 );
 
 /**
