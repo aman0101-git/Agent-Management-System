@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { fetchCaseDetails, submitDisposition, fetchNextCase } from "@/api/agentApi";
+import {
+  fetchCaseDetails,
+  submitDisposition,
+  fetchNextCase,
+  startCustomerVisit,
+  endCustomerVisit,
+  fetchCustomerVisitHistory,
+} from "@/api/agentApi";
 import { useAuth } from "@/context/AuthContext";
 import { DISPOSITIONS, requiresAmountAndDate } from "@/lib/dispositions";
 
@@ -69,6 +76,8 @@ const CustomerDetailDrawer = ({
   const [loading, setLoading] = useState(false);
   const [showEditHistory, setShowEditHistory] = useState(false);
   const [showEditHistoryModal, setShowEditHistoryModal] = useState(false);
+  const [visitId, setVisitId] = useState(null);
+  const [visitHistory, setVisitHistory] = useState([]);
 
   // Form state
   const [selectedDisposition, setSelectedDisposition] = useState("");
@@ -86,6 +95,24 @@ const CustomerDetailDrawer = ({
     }
   }, [isOpen, caseId]);
 
+  // Start a visit when drawer opens (agent clicks New / opens drawer)
+  useEffect(() => {
+    let mounted = true;
+    const startVisit = async () => {
+      if (!isOpen || !caseId) return;
+      try {
+        const res = await startCustomerVisit(caseId, token);
+        if (mounted && res?.visit_id) setVisitId(res.visit_id);
+      } catch (err) {
+        console.error('Failed to start visit', err);
+      }
+    };
+
+    startVisit();
+
+    return () => { mounted = false; };
+  }, [isOpen, caseId, token]);
+
   const loadCaseDetails = async () => {
     try {
       setLoading(true);
@@ -101,6 +128,13 @@ const CustomerDetailDrawer = ({
       setCaseData(data);
       setDispositions(res.dispositions || []);
       setEditHistory(res.editHistory || []);
+      // Load visit history for this customer
+      try {
+        const hist = await fetchCustomerVisitHistory(caseId, token);
+        setVisitHistory(hist.history || []);
+      } catch (err) {
+        console.error('Failed to fetch visit history', err);
+      }
       setShowEditHistory(false);
 
       // Reset form
@@ -162,6 +196,17 @@ const CustomerDetailDrawer = ({
         } catch { /* allocation attempt failed; nothing required client-side */ }
       }
 
+      // Ensure we end visit when disposition submitted successfully
+      if (visitId) {
+        try {
+          await endCustomerVisit(visitId, token);
+        } catch (err) {
+          console.error('Failed to end visit after disposition', err);
+        } finally {
+          setVisitId(null);
+        }
+      }
+
       // Reload case details
       await loadCaseDetails();
       onDispositionSubmitted?.();
@@ -184,12 +229,26 @@ const CustomerDetailDrawer = ({
     setEditingAgentCaseId(disposition.agent_case_id);
   };
 
+  // Handle drawer close: end visit if active, then call parent onClose
+  const handleInternalClose = async () => {
+    if (visitId) {
+      try {
+        await endCustomerVisit(visitId, token);
+      } catch (err) {
+        console.error('Failed to end visit on close', err);
+      } finally {
+        setVisitId(null);
+      }
+    }
+    onClose?.();
+  };
+
   if (!isOpen) return null;
 
   return (
     <>
       {/* Overlay */}
-      <div className="fixed inset-0 z-40 bg-black/50" onClick={onClose} />
+      <div className="fixed inset-0 z-40 bg-black/50" onClick={handleInternalClose} />
 
       {/* Modal */}
       <div className="fixed inset-0 z-50 flex items-center justify-center px-4">
@@ -204,7 +263,7 @@ const CustomerDetailDrawer = ({
                 {caseData?.phone || "-"} • {caseData?.loan_id || "-"}
               </p>
             </div>
-            <button onClick={onClose} className="text-xl">✕</button>
+            <button onClick={handleInternalClose} className="text-xl">✕</button>
           </div>
 
           {/* Body */}
@@ -305,7 +364,7 @@ const CustomerDetailDrawer = ({
                           </div>
                         );
                       })()}
-
+                        {/* SUBMIT DISPOSITION */}
                       {/* 🔹 PREVIOUS EDITS TOGGLE */}
                       {dispositions.length > 1 && (
                         <>
@@ -364,7 +423,6 @@ const CustomerDetailDrawer = ({
                     </div>
                   </Section>
                 )}
-
 
                 {/* SUBMIT DISPOSITION */}
                 {caseData.status !== "DONE" && (
@@ -463,6 +521,46 @@ const CustomerDetailDrawer = ({
                     </form>
                   </Section>
                 )}
+
+                {/* VISIT HISTORY */}
+                <Section title="Visit History">
+                  <div className="col-span-full max-h-40 overflow-y-auto space-y-2">
+                    {visitHistory.length === 0 && (
+                      <p className="text-sm text-slate-500">No visits yet</p>
+                    )}
+
+                    {visitHistory.map((v, i) => (
+                      <div
+                        key={i}
+                        className="p-2 border rounded bg-slate-50 text-sm flex justify-between items-start"
+                      >
+                        <div>
+                          <p className="text-xs text-slate-500">Agent</p>
+                          <p className="font-semibold">{v.username}</p>
+
+                          <p className="text-xs text-slate-500 mt-1">Entry</p>
+                          <p className="font-medium">
+                            {v.entry_time
+                              ? new Date(v.entry_time).toLocaleString()
+                              : "-"}
+                          </p>
+                        </div>
+
+                        <div className="text-right">
+                          <p className="text-xs text-slate-500">Exit</p>
+                          <p className="font-medium">
+                            {v.exit_time
+                              ? new Date(v.exit_time).toLocaleString()
+                              : v.entry_time
+                              ? "In Progress"
+                              : "-"}
+                          </p>
+                        </div>
+                      </div>
+
+                    ))}
+                  </div>
+                </Section>
 
               </div>
             )}

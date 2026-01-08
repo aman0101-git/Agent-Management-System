@@ -121,3 +121,31 @@ export const updateAgentTarget = async (targetAmount, token) => {
 // Kept for backward compatibility
 export const fetchAgentLoans = fetchAgentCases;
 export const fetchCustomerDetails = fetchCaseDetails;
+
+// Start a customer visit when drawer opens
+export const startCustomerVisit = async (customerId, token) => {
+  const res = await axios.post(
+    `${API_BASE}/customer-visit/start`,
+    { customer_id: customerId },
+    { headers: { Authorization: `Bearer ${token}` } }
+  );
+  return res.data;
+};
+
+// End a customer visit when drawer closes or disposition submitted
+export const endCustomerVisit = async (visitId, token) => {
+  const res = await axios.post(
+    `${API_BASE}/customer-visit/end`,
+    { visit_id: visitId },
+    { headers: { Authorization: `Bearer ${token}` }, validateStatus: (s) => s >= 200 && s < 500 }
+  );
+  return res.data;
+};
+
+// Fetch visit history for a customer
+export const fetchCustomerVisitHistory = async (customerId, token) => {
+  const res = await axios.get(`${API_BASE}/customer-visit/history/${customerId}`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  return res.data;
+};
