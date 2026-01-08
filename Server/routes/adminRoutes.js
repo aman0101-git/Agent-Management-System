@@ -9,6 +9,11 @@ import {
   updateAgentTarget,
   deleteAgentTarget,
 } from '../controllers/adminController.js';
+import {
+  getMonitoringAnalytics,
+  getMonitoringAgents,
+  getMonitoringCampaigns,
+} from '../controllers/adminMonitoringController.js';
 
 const router = express.Router();
 
@@ -60,6 +65,39 @@ router.delete(
   protect,
   allowRoles('ADMIN'),
   deleteAgentTarget
+);
+
+/**
+ * GET /api/admin/monitoring-analytics
+ * Aggregated analytics for admin across agents/campaigns
+ */
+router.get(
+  '/monitoring-analytics',
+  protect,
+  allowRoles('ADMIN'),
+  getMonitoringAnalytics
+);
+
+/**
+ * GET /api/admin/monitoring-analytics/agents
+ * List of active agents for filter dropdown
+ */
+router.get(
+  '/monitoring-analytics/agents',
+  protect,
+  allowRoles('ADMIN'),
+  getMonitoringAgents
+);
+
+/**
+ * GET /api/admin/monitoring-analytics/campaigns
+ * List of campaigns for filter dropdown
+ */
+router.get(
+  '/monitoring-analytics/campaigns',
+  protect,
+  allowRoles('ADMIN'),
+  getMonitoringCampaigns
 );
 
 export default router;
