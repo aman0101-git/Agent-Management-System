@@ -134,6 +134,9 @@ export const ingestLoans = async (req, res) => {
     const month = new Date().getMonth() + 1;
     const year = new Date().getFullYear();
 
+    // ISSUE #3 FIX: Track row count for success message
+    let ingestionCount = 0;
+
     for (const row of normalizedRows) {
       const fixedData = {};
       const extraFields = {};
@@ -173,13 +176,15 @@ export const ingestLoans = async (req, res) => {
             : null,
         ]
       );
+      ingestionCount++;
     }
 
     await conn.commit();
     conn.release();
 
     res.status(201).json({
-      message: "Data ingested and queued for assignment to agents",
+      message: `${ingestionCount} rows uploaded successfully`,
+      rowsUploaded: ingestionCount,
     });
   } catch (err) {
     if (conn) {

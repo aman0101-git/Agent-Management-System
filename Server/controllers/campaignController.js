@@ -245,36 +245,56 @@ export const getRechurnData = async (req, res) => {
   const campaignId = req.params.id;
 
   try {
-    // Get all data with IN_PROCESS disposition
+    // ISSUE #6 FIX: Show only LATEST disposition per customer (no duplicates)
     const [rechurnData] = await pool.query(
       `SELECT
-         cd.id AS case_id,
-         cd.cust_name AS customer_name,
-         cd.mobileno AS phone,
-         cd.loan_agreement_no AS loan_id,
-         cd.insl_amt,
-         cd.pos,
-         cd.created_at AS allocation_date,
-         u.firstName AS last_agent_first_name,
-         u.lastName AS last_agent_last_name,
-         ad.disposition,
-         ad.remarks,
-         ad.created_at AS last_disposition_date,
-         cd.agent_id
-       FROM Coll_Data cd
-       LEFT JOIN users u ON u.id = cd.agent_id
-       LEFT JOIN agent_cases ac ON ac.coll_data_id = cd.id
-       LEFT JOIN agent_dispositions ad ON ad.agent_case_id = ac.id
-       WHERE cd.campaign_id = ?
-         AND ac.status = 'IN_PROGRESS'
-         AND cd.is_active = TRUE
-       ORDER BY ad.created_at DESC`,
+        cd.id AS case_id,
+        cd.cust_name AS customer_name,
+        cd.mobileno AS phone,
+        cd.loan_agreement_no AS loan_id,
+        cd.insl_amt,
+        cd.pos,
+        cd.created_at AS allocation_date,
+
+        u.firstName AS last_agent_first_name,
+        u.lastName AS last_agent_last_name,
+
+        ad.disposition,
+        ad.remarks,
+        ad.created_at AS last_disposition_date,
+
+        cd.agent_id
+
+      FROM Coll_Data cd
+
+      INNER JOIN agent_cases ac
+        ON ac.coll_data_id = cd.id
+        AND ac.status = 'IN_PROGRESS'
+
+      /* 🔑 JOIN EXACTLY ONE ROW: the latest disposition */
+      INNER JOIN agent_dispositions ad
+        ON ad.id = (
+          SELECT ad2.id
+          FROM agent_dispositions ad2
+          WHERE ad2.agent_case_id = ac.id
+          ORDER BY ad2.created_at DESC, ad2.id DESC
+          LIMIT 1
+        )
+
+      LEFT JOIN users u
+        ON u.id = cd.agent_id
+
+      WHERE cd.campaign_id = ?
+        AND cd.is_active = TRUE
+
+      ORDER BY ad.created_at DESC;
+      `,
       [campaignId]
     );
 
     // Get summary stats
     const [[summary]] = await pool.query(
-      `SELECT COUNT(*) AS total
+      `SELECT COUNT(DISTINCT cd.id) AS total
        FROM Coll_Data cd
        LEFT JOIN agent_cases ac ON ac.coll_data_id = cd.id
        WHERE cd.campaign_id = ?

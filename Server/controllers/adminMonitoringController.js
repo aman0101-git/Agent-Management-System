@@ -55,6 +55,7 @@ export const getMonitoringAnalytics = async (req, res) => {
 
     /* ===============================
        3. DYNAMIC FILTERS (SCHEMA-SAFE)
+       ISSUE #5 FIX: Support array-based filters (comma-separated)
        =============================== */
     let whereClause = `
       WHERE u.role = 'AGENT'
@@ -62,14 +63,20 @@ export const getMonitoringAnalytics = async (req, res) => {
     `;
     const params = [];
 
+    // Parse comma-separated agent IDs
     if (agent_id !== "ALL") {
-      whereClause += " AND ad.agent_id = ?";
-      params.push(agent_id);
+      const agentIds = agent_id.split(",").map((id) => id.trim());
+      const placeholders = agentIds.map(() => "?").join(",");
+      whereClause += ` AND ad.agent_id IN (${placeholders})`;
+      params.push(...agentIds);
     }
 
+    // Parse comma-separated campaign IDs
     if (campaign_id !== "ALL") {
-      whereClause += " AND ca.campaign_id = ?";
-      params.push(campaign_id);
+      const campaignIds = campaign_id.split(",").map((id) => id.trim());
+      const placeholders = campaignIds.map(() => "?").join(",");
+      whereClause += ` AND ca.campaign_id IN (${placeholders})`;
+      params.push(...campaignIds);
     }
 
     /* ===============================

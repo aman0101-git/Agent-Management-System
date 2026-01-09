@@ -1,8 +1,14 @@
 import pool from '../config/mysql.js';
+import {
+  DISPOSITION_RULES,
+  validateDispositionData,
+  getResultStatus,
+} from '../config/dispositionRules.js';
 
 /**
  * GET /api/agent/cases
  * Fetch agent dashboard list from Coll_Data table
+ * ISSUE #12 FIX: Enforce campaign-to-agent mapping - agents only see their campaign data
  * Excludes IN_PROCESS status (Rechurn) data
  */
 export const getAgentCases = async (req, res) => {
@@ -28,12 +34,15 @@ export const getAgentCases = async (req, res) => {
       FROM coll_data c
       LEFT JOIN agent_cases ac
         ON ac.coll_data_id = c.id
+      /* ISSUE #12 FIX: Ensure agent is mapped to the campaign */
+      INNER JOIN campaign_agents ca
+        ON ca.agent_id = ? AND ca.campaign_id = c.campaign_id
       WHERE c.agent_id = ?
         AND c.is_active = 1
         AND COALESCE(ac.status, 'NEW') != 'IN_PROGRESS'
       ORDER BY c.created_at DESC
       `,
-      [agentId]
+      [agentId, agentId]
     );
 
     return res.json({ data: rows });
@@ -46,6 +55,7 @@ export const getAgentCases = async (req, res) => {
 /**
  * GET /api/agent/cases/:caseId
  * Fetch single case + disposition history + edit history
+ * ISSUE #12 FIX: Verify agent belongs to the case's campaign
  */
 export const getAgentCaseById = async (req, res) => {
   try {
@@ -54,6 +64,7 @@ export const getAgentCaseById = async (req, res) => {
 
     /* ===============================
        1️⃣ Fetch main case details
+       ISSUE #12 FIX: Verify campaign assignment
        =============================== */
     const [[row]] = await pool.query(
       `
@@ -101,12 +112,15 @@ export const getAgentCaseById = async (req, res) => {
       FROM coll_data c
       LEFT JOIN agent_cases ac
         ON ac.coll_data_id = c.id
+      /* ISSUE #12 FIX: Ensure agent is assigned to this campaign */
+      INNER JOIN campaign_agents ca
+        ON ca.agent_id = ? AND ca.campaign_id = c.campaign_id
       WHERE c.id = ?
         AND c.agent_id = ?
       ORDER BY ac.created_at DESC
       LIMIT 1
       `,
-      [caseId, agentId]
+      [agentId, caseId, agentId]
     );
 
     if (!row) {
@@ -138,6 +152,7 @@ export const getAgentCaseById = async (req, res) => {
 
     /* ===============================
        3️⃣ Fetch disposition history
+       ISSUE #8 FIX: Include ptp_target in query
        =============================== */
     const [dispositions] = await pool.query(
       `
@@ -149,6 +164,7 @@ export const getAgentCaseById = async (req, res) => {
         promise_amount,
         follow_up_date,
         follow_up_time,
+        ptp_target,
         created_at
       FROM agent_dispositions
       WHERE agent_case_id = ?
@@ -159,6 +175,7 @@ export const getAgentCaseById = async (req, res) => {
 
     /* ===============================
        4️⃣ Fetch full edit history
+       ISSUE #8 FIX: Include ptp_target in edit history
        =============================== */
     const [editHistory] = await pool.query(
       `
@@ -170,6 +187,7 @@ export const getAgentCaseById = async (req, res) => {
         promise_amount,
         follow_up_date,
         follow_up_time,
+        ptp_target,
         edited_at
       FROM agent_dispositions_edit_history
       WHERE agent_case_id = ?
@@ -195,6 +213,31 @@ export const getAgentCaseById = async (req, res) => {
  * POST /api/agent/cases/:caseId/disposition
  * Submit or edit disposition
  */
+/**
+ * RULE-DRIVEN DISPOSITION VALIDATION
+ * 
+ * Validates submission against disposition rules. For time fields,
+ * ensures HH:mm format is preserved (no Date object parsing).
+ * 
+ * @param {string} dispositionCode - e.g., 'PTP', 'CBC'
+ * @param {string} followUpTime - Time in HH:mm format (e.g., "14:30")
+ * @returns {object} { valid: boolean, error: string | null }
+ */
+function validateTimeFormat(followUpTime) {
+  if (!followUpTime) return { valid: true, error: null };
+  
+  // Must be HH:mm format
+  const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
+  if (!timeRegex.test(followUpTime)) {
+    return {
+      valid: false,
+      error: `Invalid time format. Expected HH:mm (24-hour), got ${followUpTime}`,
+    };
+  }
+  
+  return { valid: true, error: null };
+}
+
 export const submitDisposition = async (req, res) => {
   const conn = await pool.getConnection();
 
@@ -212,29 +255,53 @@ export const submitDisposition = async (req, res) => {
       isEdit,
     } = req.body;
 
-    const NEEDS_FOLLOW_UP = ['PTP', 'BRP', 'PRT', 'CBC'];
-    const NEEDS_AMOUNT = ['PTP', 'BRP', 'PRT', 'SIF', 'PIF', 'FCL'];
-    const DONE = ['SIF', 'PIF', 'FCL'];
-    const IN_PROGRESS = [
-      'RTP',
-      'TPC',
-      'LNB',
-      'VOI',
-      'RNR',
-      'SOW',
-      'OOS',
-      'WRN',
-    ];
-
+    // ==========================================
+    // INPUT VALIDATION
+    // ==========================================
+    
     if (!disposition) {
       return res.status(400).json({ message: "Disposition required" });
     }
 
+    // Validate disposition exists
+    if (!DISPOSITION_RULES[disposition]) {
+      return res.status(400).json({
+        message: `Unknown disposition: ${disposition}`,
+      });
+    }
+
+    // Rule-driven validation
+    const validationResult = validateDispositionData(disposition, {
+      amount: promiseAmount,
+      followUpDate,
+      followUpTime,
+      remarks,
+    });
+
+    if (!validationResult.valid) {
+      return res.status(400).json({
+        message: "Validation failed",
+        errors: validationResult.errors,
+      });
+    }
+
+    // Validate time format if provided
+    if (followUpTime) {
+      const timeValidation = validateTimeFormat(followUpTime);
+      if (!timeValidation.valid) {
+        return res.status(400).json({
+          message: "Invalid follow-up time format",
+          error: timeValidation.error,
+        });
+      }
+    }
+
     await conn.beginTransaction();
 
-    /* ===============================
-       1️⃣ Lock latest agent_case
-       =============================== */
+    // ==========================================
+    // 1️⃣ LOCK LATEST AGENT_CASE
+    // ==========================================
+    
     const [[agentCase]] = await conn.query(
       `
       SELECT id, status
@@ -253,24 +320,17 @@ export const submitDisposition = async (req, res) => {
       return res.status(404).json({ message: "Agent case not found" });
     }
 
-    /* ===============================
-       2️⃣ Determine new status
-       =============================== */
-    let newStatus = agentCase.status;
-
-    if (NEEDS_FOLLOW_UP.includes(disposition)) {
-      newStatus = 'FOLLOW_UP';
-    } else if (IN_PROGRESS.includes(disposition)) {
-      newStatus = 'IN_PROGRESS';
-    } else if (DONE.includes(disposition)) {
-      newStatus = 'DONE';
-    }
-
+    // ==========================================
+    // 2️⃣ DETERMINE NEW STATUS FROM RULES
+    // ==========================================
+    
+    const newStatus = getResultStatus(disposition);
     const statusChanged = newStatus !== agentCase.status;
 
-    /* ===============================
-       3️⃣ Save edit history (if edit)
-       =============================== */
+    // ==========================================
+    // 3️⃣ SAVE EDIT HISTORY (IF EDIT)
+    // ==========================================
+    
     if (isEdit) {
       const [[latest]] = await conn.query(
         `
@@ -279,7 +339,8 @@ export const submitDisposition = async (req, res) => {
           remarks,
           promise_amount,
           follow_up_date,
-          follow_up_time
+          follow_up_time,
+          ptp_target
         FROM agent_dispositions
         WHERE agent_case_id = ?
         ORDER BY created_at DESC
@@ -299,9 +360,10 @@ export const submitDisposition = async (req, res) => {
             remarks,
             promise_amount,
             follow_up_date,
-            follow_up_time
+            follow_up_time,
+            ptp_target
           )
-          VALUES (?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
           `,
           [
             agentCase.id,
@@ -310,30 +372,27 @@ export const submitDisposition = async (req, res) => {
             latest.promise_amount,
             latest.follow_up_date,
             latest.follow_up_time,
+            latest.ptp_target,
           ]
         );
       }
     }
 
-    /* ===============================
-       4️⃣ Insert new disposition
-       =============================== */
-    let dispositionAmount = null;
-
-    // Only specific dispositions carry amount
-    if (NEEDS_AMOUNT.includes(disposition)) {
-      if (promiseAmount === undefined || promiseAmount === null) {
-        return res.status(400).json({
-          message: "Promise amount required for this disposition",
-        });
-      }
-      dispositionAmount = promiseAmount;
-    }
-
-    // RTP explicitly cancels promise
-    if (disposition === 'RTP') {
-      dispositionAmount = null;
-    }
+    // ==========================================
+    // 4️⃣ PROCESS DISPOSITION DATA
+    // ==========================================
+    
+    const rule = DISPOSITION_RULES[disposition];
+    
+    // Amount: Only include if disposition requires it; otherwise NULL
+    const dispositionAmount = rule.requires.amount ? promiseAmount : null;
+    
+    // Follow-up date/time: Only include if disposition requires it; otherwise NULL
+    const dispositionFollowUpDate = rule.requires.followUpDate ? followUpDate : null;
+    const dispositionFollowUpTime = rule.requires.followUpTime ? followUpTime : null;
+    
+    // PTP target: Only for PTP disposition
+    const dispositionPtpTarget = disposition === 'PTP' ? ptpTarget : null;
 
     await conn.query(
       `
@@ -355,17 +414,18 @@ export const submitDisposition = async (req, res) => {
         agentCase.id,
         agentId,
         disposition,
-        disposition === 'PTP' ? ptpTarget : null,
+        dispositionPtpTarget,
         remarks || null,
         dispositionAmount,
-        NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
-        NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
+        dispositionFollowUpDate,
+        dispositionFollowUpTime,
       ]
     );
 
-    /* ===============================
-       5️⃣ Update agent_case
-       =============================== */
+    // ==========================================
+    // 5️⃣ UPDATE AGENT_CASE
+    // ==========================================
+    
     if (statusChanged) {
       await conn.query(
         `
@@ -381,8 +441,8 @@ export const submitDisposition = async (req, res) => {
         `,
         [
           newStatus,
-          NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,
-          NEEDS_FOLLOW_UP.includes(disposition) ? followUpTime : null,
+          dispositionFollowUpDate,
+          dispositionFollowUpTime,
           agentCase.id,
         ]
       );
@@ -402,6 +462,7 @@ export const submitDisposition = async (req, res) => {
     console.error("submitDisposition error:", err);
     return res.status(500).json({
       message: "Failed to submit disposition",
+      error: err.message,
     });
   } finally {
     conn.release();
@@ -411,6 +472,7 @@ export const submitDisposition = async (req, res) => {
 /**
  * GET /api/agent/cases/next
  * Allocate and fetch a single next queued case for the agent
+ * ISSUE #12 FIX: Only assign cases from campaigns the agent is mapped to
  */
 export const getNextCase = async (req, res) => {
   const conn = await pool.getConnection();
@@ -430,13 +492,18 @@ export const getNextCase = async (req, res) => {
     }
 
     // 2️⃣ Fetch next unassigned customer
+    // ISSUE #12 FIX: Only from campaigns agent is assigned to
     const [[next]] = await conn.query(
-      `SELECT id, cust_name, mobileno, loan_agreement_no
-       FROM coll_data
-       WHERE agent_id IS NULL AND is_active = 1
-       ORDER BY created_at ASC
+      `SELECT c.id, c.cust_name, c.mobileno, c.loan_agreement_no
+       FROM coll_data c
+       /* ISSUE #12 FIX: Verify campaign assignment */
+       INNER JOIN campaign_agents ca
+         ON ca.agent_id = ? AND ca.campaign_id = c.campaign_id
+       WHERE c.agent_id IS NULL AND c.is_active = 1
+       ORDER BY c.created_at ASC
        LIMIT 1
-       FOR UPDATE`
+       FOR UPDATE`,
+      [agentId]
     );
 
     if (!next) {
