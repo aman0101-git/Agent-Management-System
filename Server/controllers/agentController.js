@@ -208,6 +208,7 @@ export const submitDisposition = async (req, res) => {
       promiseAmount,
       followUpDate,
       followUpTime,
+      ptpTarget,
       isEdit,
     } = req.body;
 
@@ -341,18 +342,20 @@ export const submitDisposition = async (req, res) => {
         agent_case_id,
         agent_id,
         disposition,
+        ptp_target,
         remarks,
         promise_amount,
         follow_up_date,
         follow_up_time,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         agentCase.id,
         agentId,
         disposition,
+        disposition === 'PTP' ? ptpTarget : null,
         remarks || null,
         dispositionAmount,
         NEEDS_FOLLOW_UP.includes(disposition) ? followUpDate : null,

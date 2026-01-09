@@ -59,7 +59,6 @@ export const getMonitoringAnalytics = async (req, res) => {
     let whereClause = `
       WHERE u.role = 'AGENT'
         AND u.isActive = 1
-        AND ac.is_active = 1
     `;
     const params = [];
 
@@ -79,8 +78,8 @@ export const getMonitoringAnalytics = async (req, res) => {
     const [[overview]] = await pool.query(
       `
       SELECT
-        COUNT(ad.id) AS calls_attended,
-        COUNT(DISTINCT CASE WHEN ad.disposition = 'PTP' THEN ad.agent_case_id END) AS ptp_count,
+        COUNT(DISTINCT ad.id) AS calls_attended,
+        COUNT(DISTINCT CASE WHEN ad.disposition = 'PTP' THEN ac.id END) AS ptp_count,
         COALESCE(
           SUM(CASE WHEN ad.disposition = 'PTP' THEN ad.promise_amount ELSE 0 END),
           0
