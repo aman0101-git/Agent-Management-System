@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useNavigate } from "react-router-dom";
 import axios from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
@@ -6,6 +7,7 @@ import { Input } from "@/components/ui/input";
 
 const CreateUser = () => {
   const { token } = useAuth();
+  const navigate = useNavigate();
   const [form, setForm] = useState({
     firstName: "",
     lastName: "",
@@ -40,6 +42,11 @@ const CreateUser = () => {
         password: "",
         role: "AGENT",
       });
+      
+      // ISSUE #1 FIX: Redirect to Admin Dashboard after successful user creation
+      setTimeout(() => {
+        navigate("/admin/dashboard");
+      }, 1500);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to create user");
     }

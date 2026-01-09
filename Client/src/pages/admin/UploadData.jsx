@@ -102,7 +102,12 @@ const UploadData = () => {
         formData,
         { headers }
       );
-      setMessage(res.data.message || "Upload completed");
+      // ISSUE #3 FIX: Display rows uploaded from backend response
+      const rowsUploaded = res.data.rowsUploaded || 0;
+      const successMsg = rowsUploaded > 0 
+        ? `${rowsUploaded} rows uploaded successfully`
+        : res.data.message || "Upload completed";
+      setMessage(successMsg);
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || "Upload failed");
     } finally {

@@ -10,8 +10,9 @@ import { Button } from "@/components/ui/button";
 const MonitoringAnalytics = () => {
   const { token } = useAuth();
 
-  const [campaignId, setCampaignId] = useState("ALL");
-  const [agentId, setAgentId] = useState("ALL");
+  // ISSUE #5 FIX: Use arrays for multi-select instead of single values
+  const [selectedCampaignIds, setSelectedCampaignIds] = useState([]);
+  const [selectedAgentIds, setSelectedAgentIds] = useState([]);
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
   const [dateFilter, setDateFilter] = useState("thisMonth");
@@ -101,13 +102,24 @@ const MonitoringAnalytics = () => {
     }
   }, [startDate, endDate, token]);
 
+  // ISSUE #5 FIX: Build campaign and agent filter strings
+  const getCampaignFilterParam = () => {
+    if (selectedCampaignIds.length === 0) return "ALL";
+    return selectedCampaignIds.join(",");
+  };
+
+  const getAgentFilterParam = () => {
+    if (selectedAgentIds.length === 0) return "ALL";
+    return selectedAgentIds.join(",");
+  };
+
   const loadAnalytics = async () => {
     setLoading(true);
     setError("");
     try {
       const data = await fetchMonitoringAnalytics(
-        campaignId,
-        agentId,
+        getCampaignFilterParam(),
+        getAgentFilterParam(),
         startDate,
         endDate,
         token
@@ -118,6 +130,42 @@ const MonitoringAnalytics = () => {
       setError(err.response?.data?.message || "Failed to load analytics");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // ISSUE #5 FIX: Toggle campaign checkbox
+  const toggleCampaign = (campaignId) => {
+    setSelectedCampaignIds((prev) =>
+      prev.includes(campaignId)
+        ? prev.filter((id) => id !== campaignId)
+        : [...prev, campaignId]
+    );
+  };
+
+  // ISSUE #5 FIX: Toggle agent checkbox
+  const toggleAgent = (agentId) => {
+    setSelectedAgentIds((prev) =>
+      prev.includes(agentId)
+        ? prev.filter((id) => id !== agentId)
+        : [...prev, agentId]
+    );
+  };
+
+  // ISSUE #5 FIX: Select all campaigns
+  const selectAllCampaigns = () => {
+    if (selectedCampaignIds.length === campaigns.length) {
+      setSelectedCampaignIds([]);
+    } else {
+      setSelectedCampaignIds(campaigns.map((c) => c.id));
+    }
+  };
+
+  // ISSUE #5 FIX: Select all agents
+  const selectAllAgents = () => {
+    if (selectedAgentIds.length === agents.length) {
+      setSelectedAgentIds([]);
+    } else {
+      setSelectedAgentIds(agents.map((a) => a.id));
     }
   };
 
@@ -161,7 +209,7 @@ const MonitoringAnalytics = () => {
           <p className="text-sm font-semibold text-slate-900 mb-4">Filters</p>
 
           {/* DATE PRESET BUTTONS */}
-          <div className="mb-4 flex gap-2 flex-wrap">
+          <div className="mb-6 flex gap-2 flex-wrap">
             <button
               onClick={() => handleDateFilterChange("today")}
               className={`px-4 py-2 text-xs font-medium rounded-lg transition ${
@@ -214,46 +262,8 @@ const MonitoringAnalytics = () => {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
-            {/* Campaign Filter */}
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-2">
-                Campaign
-              </label>
-              <select
-                value={campaignId}
-                onChange={(e) => setCampaignId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              >
-                <option value="ALL">All Campaigns</option>
-                {campaigns.map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {c.campaign_name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Agent Filter */}
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-2">
-                Agent
-              </label>
-              <select
-                value={agentId}
-                onChange={(e) => setAgentId(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              >
-                <option value="ALL">All Active Agents</option>
-                {agents.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.username}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Start Date */}
+          {/* Date Inputs */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-2">
                 Start Date
@@ -266,7 +276,6 @@ const MonitoringAnalytics = () => {
               />
             </div>
 
-            {/* End Date */}
             <div>
               <label className="block text-xs font-medium text-slate-700 mb-2">
                 End Date
@@ -278,21 +287,89 @@ const MonitoringAnalytics = () => {
                 className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
               />
             </div>
+          </div>
 
-            {/* Apply Button */}
-            <div className="flex items-end">
-              <Button
-                onClick={loadAnalytics}
-                disabled={loading}
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium"
+          {/* ISSUE #5 FIX: Campaign Multi-Select with Checkboxes */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <label className="block text-sm font-medium text-slate-700">
+                Campaigns
+              </label>
+              <button
+                onClick={selectAllCampaigns}
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
               >
-                {loading ? "Loading..." : "Apply"}
-              </Button>
+                {selectedCampaignIds.length === campaigns.length
+                  ? "Deselect All"
+                  : "Select All"}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {campaigns.map((c) => (
+                <label
+                  key={c.id}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedCampaignIds.includes(c.id)}
+                    onChange={() => toggleCampaign(c.id)}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-slate-700">
+                    {c.campaign_name}
+                  </span>
+                </label>
+              ))}
             </div>
           </div>
 
+          {/* ISSUE #5 FIX: Agent Multi-Select with Checkboxes */}
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-3">
+              <label className="block text-sm font-medium text-slate-700">
+                Agents
+              </label>
+              <button
+                onClick={selectAllAgents}
+                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+              >
+                {selectedAgentIds.length === agents.length
+                  ? "Deselect All"
+                  : "Select All"}
+              </button>
+            </div>
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {agents.map((a) => (
+                <label
+                  key={a.id}
+                  className="flex items-center gap-2 cursor-pointer"
+                >
+                  <input
+                    type="checkbox"
+                    checked={selectedAgentIds.includes(a.id)}
+                    onChange={() => toggleAgent(a.id)}
+                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                  />
+                  <span className="text-sm text-slate-700">{a.username}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          {/* Apply Button */}
+          <div className="flex gap-2">
+            <Button
+              onClick={loadAnalytics}
+              disabled={loading}
+              className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+            >
+              {loading ? "Loading..." : "Apply Filters"}
+            </Button>
+          </div>
+
           {error && (
-            <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
+            <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm font-medium text-red-700">
               {error}
             </div>
           )}

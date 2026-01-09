@@ -66,6 +66,14 @@ const AdminDashboard = () => {
               base: "from-blue-500 to-indigo-500",
               hover: "hover:from-blue-600 hover:to-indigo-600",
             },
+            {
+              title: "Monitoring",
+              desc: "Track agent performance and activity.",
+              action: "Open Monitoring",
+              link: "/admin/monitoring-analytics",
+              base: "from-amber-500 to-orange-500",
+              hover: "hover:from-amber-600 hover:to-orange-600",
+            },
           ].map((item) => (
             <div
               key={item.title}
@@ -87,16 +95,6 @@ const AdminDashboard = () => {
               </Link>
             </div>
           ))}
-
-          {/* Disabled Card */}
-          <div className="group rounded-2xl border border-slate-200 bg-white p-6 shadow-sm transition-all hover:-translate-y-1 hover:shadow-lg">
-            <h2 className="text-lg font-semibold text-slate-900">Monitoring</h2>
-            <p className="mt-2 text-sm text-slate-600">Track agent performance and activity.</p>
-
-            <Link to="/admin/monitoring-analytics">
-              <Button className="mt-5 w-full bg-gradient-to-r from-blue-500 to-indigo-500 text-white">Open Monitoring</Button>
-            </Link>
-          </div>
         </div>
       </main>
     </div>

@@ -8,7 +8,7 @@ import {
   fetchCustomerVisitHistory,
 } from "@/api/agentApi";
 import { useAuth } from "@/context/AuthContext";
-import { DISPOSITIONS, requiresAmountAndDate } from "@/lib/dispositions";
+import { DISPOSITIONS, requiresAmountAndDate, requiresAmount, requiresDateOnly } from "@/lib/dispositions";
 
 /* ---------- Reusable UI ---------- */
 
@@ -60,6 +60,22 @@ const formatFollowUp = (date, time) => {
   });
 
   return `${formattedDate} at ${formattedTime}`;
+};
+
+// ISSUE #7 FIX: Format dates to Excel-style (DD/MM/YYYY)
+const formatDateOnly = (dateStr) => {
+  if (!dateStr) return "-";
+  
+  let d;
+  if (typeof dateStr === "string" && dateStr.includes("T")) {
+    d = new Date(dateStr);
+  } else {
+    d = new Date(dateStr);
+  }
+  
+  if (isNaN(d.getTime())) return "-";
+  
+  return d.toLocaleDateString("en-GB"); // DD/MM/YYYY
 };
 
 const CustomerDetailDrawer = ({
@@ -159,38 +175,47 @@ const CustomerDetailDrawer = ({
       return;
     }
 
-    // Validate amount and date-time only for dispositions that require them
-    if (
-      requiresAmountAndDate(selectedDisposition) &&
-      (!promiseAmount || !followUpDate || !followUpTime)
-    ) {
-      alert("Amount, follow-up date and time are required for this disposition");
+    // ============================================
+    // CLIENT-SIDE VALIDATION (using dispositions rules)
+    // ============================================
+    
+    if (requiresAmount(selectedDisposition) && !promiseAmount) {
+      alert("Promise amount is required for this disposition");
       return;
+    }
+
+    if (requiresAmountAndDate(selectedDisposition)) {
+      if (!followUpDate) {
+        alert("Follow-up date is required for this disposition");
+        return;
+      }
+      if (!followUpTime) {
+        alert("Follow-up time is required for this disposition");
+        return;
+      }
     }
 
     try {
       setSubmitting(true);
 
-      const res = await submitDisposition(
-        caseId,
-        {
-          disposition: selectedDisposition,
-          remarks,
-          promiseAmount: requiresAmountAndDate(selectedDisposition)
-            ? promiseAmount
-            : null,
-          followUpDate: requiresAmountAndDate(selectedDisposition)
-            ? followUpDate
-            : null,
-          followUpTime: requiresAmountAndDate(selectedDisposition)
-            ? followUpTime
-            : null,
-          ptpTarget: selectedDisposition === 'PTP' ? ptpTarget : null,
-          isEdit: isEditing,
-          agentCaseId: editingAgentCaseId,
-        },
-        token
-      );
+      // ============================================
+      // PREPARE SUBMISSION DATA
+      // ============================================
+      
+      // Time input type="time" provides HH:mm format (e.g., "14:30")
+      // Don't parse or transform it - send as-is to backend
+      const submissionData = {
+        disposition: selectedDisposition,
+        remarks,
+        promiseAmount: requiresAmount(selectedDisposition) ? promiseAmount : null,
+        followUpDate: requiresAmountAndDate(selectedDisposition) ? followUpDate : null,
+        followUpTime: requiresAmountAndDate(selectedDisposition) ? followUpTime : null,
+        ptpTarget: selectedDisposition === 'PTP' ? ptpTarget : null,
+        isEdit: isEditing,
+        agentCaseId: editingAgentCaseId,
+      };
+
+      const res = await submitDisposition(caseId, submissionData, token);
 
       // If status changed, allocate next customer
       if (res.allocateNext || res.allocateNextOnStatusChange) {
@@ -216,8 +241,17 @@ const CustomerDetailDrawer = ({
       onDispositionSubmitted?.();
 
     } catch (err) {
-      console.error(err);
-      alert("Failed to submit disposition");
+      console.error('Disposition submission error:', err);
+      
+      // Handle backend validation errors
+      if (err.errors && Array.isArray(err.errors)) {
+        const errorList = err.errors.join('\n');
+        alert(`Validation failed:\n\n${errorList}`);
+      } else if (err.message) {
+        alert(`Error: ${err.message}`);
+      } else {
+        alert("Failed to submit disposition");
+      }
     } finally {
       setSubmitting(false);
     }
@@ -306,8 +340,9 @@ const CustomerDetailDrawer = ({
                   <Field label="Group Name" value={caseData.group_name} />
                   <Field label="Residence Address" value={caseData.res_addr} />
                   <Field label="Office Address" value={caseData.off_addr} />
-                  <Field label="Disbursement Date" value={caseData.disb_date} />
-                  <Field label="FDD" value={caseData.fdd} />
+                  {/* ISSUE #7 FIX: Format disbursement date to Excel-style */}
+                  <Field label="Disbursement Date" value={formatDateOnly(caseData.disb_date)} />
+                  <Field label="FDD" value={formatDateOnly(caseData.fdd)} />
                 </Section>
 
                 <Section title="Data Information">
@@ -321,7 +356,8 @@ const CustomerDetailDrawer = ({
                 {/* DISPOSITION HISTORY */}
                 {dispositions.length > 0 && (
                   <Section title="Disposition History">
-                    <div className="col-span-full space-y-3">
+                    {/* ISSUE #10 FIX: Add max-height with scrolling */}
+                    <div className="col-span-full space-y-3 max-h-96 overflow-y-auto pr-2">
 
                       {/* 🔹 LATEST DISPOSITION */}
                       {(() => {
@@ -338,13 +374,13 @@ const CustomerDetailDrawer = ({
                                   {latest.created_at ? new Date(latest.created_at).toLocaleString("en-IN") : "-"}
                                 </p>
                               </div>
-                              <button
+                              {/* <button
                                 type="button"
                                 className="text-xs text-indigo-600 hover:underline font-medium"
                                 onClick={() => handleEditDisposition(latest)}
                               >
                                 Edit
-                              </button>
+                              </button> */}
                             </div>
 
                             {latest.remarks && (
@@ -357,6 +393,14 @@ const CustomerDetailDrawer = ({
                                 <strong>
                                   ₹{parseFloat(latest.promise_amount).toFixed(2)}
                                 </strong>
+                              </p>
+                            )}
+
+                            {/* ISSUE #8 FIX: Display PTP target if present */}
+                            {latest.ptp_target && (
+                              <p className="text-sm">
+                                PTP Target:{" "}
+                                <strong>{latest.ptp_target}</strong>
                               </p>
                             )}
 
@@ -412,6 +456,14 @@ const CustomerDetailDrawer = ({
                                     </p>
                                   )}
 
+                                  {/* ISSUE #8 FIX: Display PTP target in edit history */}
+                                  {d.ptp_target && (
+                                    <p>
+                                      <span className="font-medium">PTP Target:</span>{" "}
+                                      {d.ptp_target}
+                                    </p>
+                                  )}
+
                                   {d.follow_up_date && (
                                     <p>
                                       <span className="font-medium">Follow-up:</span>{" "}
@@ -461,51 +513,52 @@ const CustomerDetailDrawer = ({
                       </div>
 
                       <div className="space-y-3 text-sm">
-                        {/* CONDITIONALLY SHOW AMOUNT AND DATE-TIME */}
+                        {/* ISSUE #9 FIX: Conditionally show amount field - NOT for CBC */}
+                        {requiresAmount(selectedDisposition) && (
+                          <input
+                            type="number"
+                            placeholder="Promise Amount (₹)"
+                            value={promiseAmount}
+                            onChange={(e) => setPromiseAmount(e.target.value)}
+                            className="w-full border rounded px-3 py-2"
+                            step="0.01"
+                          />
+                        )}
+
+                        {/* Show date-time for dispositions that need them */}
                         {requiresAmountAndDate(selectedDisposition) && (
-                          <>
+                          <div className="flex gap-3">
                             <input
-                              type="number"
-                              placeholder="Promise Amount (₹)"
-                              value={promiseAmount}
-                              onChange={(e) => setPromiseAmount(e.target.value)}
-                              className="w-full border rounded px-3 py-2"
-                              step="0.01"
+                              type="date"
+                              value={followUpDate}
+                              onChange={(e) => setFollowUpDate(e.target.value)}
+                              className="flex-1 border rounded px-2 py-1"
                             />
+                            <input
+                              type="time"
+                              value={followUpTime}
+                              onChange={(e) => setFollowUpTime(e.target.value)}
+                              className="flex-1 border rounded px-2 py-1"
+                            />
+                          </div>
+                        )}
 
-                            <div className="flex gap-3">
-                              <input
-                                type="date"
-                                value={followUpDate}
-                                onChange={(e) => setFollowUpDate(e.target.value)}
-                                className="flex-1 border rounded px-2 py-1"
-                              />
-                              <input
-                                type="time"
-                                value={followUpTime}
-                                onChange={(e) => setFollowUpTime(e.target.value)}
-                                className="flex-1 border rounded px-2 py-1"
-                              />
-                            </div>
-
-                            {/* PTP TARGET SELECTION */}
-                            {selectedDisposition === 'PTP' && (
-                              <div>
-                                <label className="block text-xs font-medium text-slate-700 mb-1">PTP Target Disposition</label>
-                                <select
-                                  value={ptpTarget}
-                                  onChange={(e) => setPtpTarget(e.target.value)}
-                                  className="w-full border rounded px-3 py-2"
-                                >
-                                  <option value="">Select Target</option>
-                                  <option value="SIF">SIF - Settled In Full</option>
-                                  <option value="PIF">PIF - Paid In Full</option>
-                                  <option value="FCL">FCL - Foreclosure</option>
-                                  <option value="PRT">PRT - Part Payment</option>
-                                </select>
-                              </div>
-                            )}
-                          </>
+                        {/* PTP TARGET SELECTION */}
+                        {selectedDisposition === 'PTP' && (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">PTP Target Disposition</label>
+                            <select
+                              value={ptpTarget}
+                              onChange={(e) => setPtpTarget(e.target.value)}
+                              className="w-full border rounded px-3 py-2"
+                            >
+                              <option value="">Select Target</option>
+                              <option value="SIF">SIF - Settled In Full</option>
+                              <option value="PIF">PIF - Paid In Full</option>
+                              <option value="FCL">FCL - Foreclosure</option>
+                              <option value="PRT">PRT - Part Payment</option>
+                            </select>
+                          </div>
                         )}
 
                         {!requiresAmountAndDate(selectedDisposition) && selectedDisposition && (

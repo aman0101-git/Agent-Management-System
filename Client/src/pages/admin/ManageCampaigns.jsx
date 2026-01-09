@@ -69,7 +69,7 @@ const ManageCampaigns = () => {
         );
 
         const map = {};
-        res.data.forEach((row) => {
+        res.data.targets.forEach((row) => {
           map[row.agent_id] = row.target_amount;
         });
 
@@ -79,8 +79,11 @@ const ManageCampaigns = () => {
       }
     };
 
-    if (token) loadAgentTargets();
-  }, [token]);
+    // ISSUE #4 FIX: Load targets whenever campaigns change to ensure fresh data
+    if (token && campaigns.length > 0) {
+      loadAgentTargets();
+    }
+  }, [token, campaigns]);
 
   const toggleCampaign = async (id, status) => {
     try {

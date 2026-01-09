@@ -37,7 +37,7 @@ export const DISPOSITIONS = {
     name: 'Call Back Confirmed',
     description: 'Callback confirmed from customer',
     status: 'FOLLOW_UP',
-    showAmountAndDate: true,
+    showAmountAndDate: 'dateOnly', // ISSUE #9 FIX: CBC needs date/time but NO amount
   },
 
   // IN_PROGRESS Status - NO Date-Time and Amount
@@ -120,7 +120,18 @@ export const getDispositionsList = () => {
 };
 
 export const requiresAmountAndDate = (dispositionCode) => {
-  return DISPOSITIONS[dispositionCode]?.showAmountAndDate || false;
+  const val = DISPOSITIONS[dispositionCode]?.showAmountAndDate;
+  return val === true || val === 'dateOnly';
+};
+
+// ISSUE #9 FIX: New helper to check if amount is required
+export const requiresAmount = (dispositionCode) => {
+  return DISPOSITIONS[dispositionCode]?.showAmountAndDate === true;
+};
+
+// ISSUE #9 FIX: New helper to check if only date is required (not amount)
+export const requiresDateOnly = (dispositionCode) => {
+  return DISPOSITIONS[dispositionCode]?.showAmountAndDate === 'dateOnly';
 };
 
 export const getStatusForDisposition = (dispositionCode) => {

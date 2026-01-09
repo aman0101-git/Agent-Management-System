@@ -34,8 +34,18 @@ export const submitDisposition = async (caseId, payload, token) => {
       headers: {
         Authorization: `Bearer ${token}`,
       },
+      // Allow 4xx errors to be handled by caller
+      validateStatus: (status) => status >= 200 && status < 500,
     }
   );
+
+  // If there's an error response, throw it with details
+  if (res.status >= 400) {
+    const error = new Error(res.data?.message || 'Disposition submission failed');
+    error.errors = res.data?.errors; // Include validation errors array
+    error.status = res.status;
+    throw error;
+  }
 
   return res.data;
 };
