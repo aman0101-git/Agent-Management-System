@@ -17,6 +17,7 @@ const ManageCampaigns = () => {
   const [selectedCampaignId, setSelectedCampaignId] = useState(null);
   const [targetAmount, setTargetAmount] = useState({});
   const [settingTarget, setSettingTarget] = useState({});
+  const [editingCampaign, setEditingCampaign] = useState(null);
   const [agentTargetAmount, setAgentTargetAmount] = useState({});
   const [settingAgentTarget, setSettingAgentTarget] = useState({});
   const [agentTargets, setAgentTargets] = useState({});
@@ -129,36 +130,36 @@ const ManageCampaigns = () => {
   };
 
   const handleSetTarget = async (campaignId) => {
-  try {
-    const amount = Number(targetAmount[campaignId]);
+    try {
+      const amount = Number(targetAmount[campaignId]);
 
-    if (!amount || amount <= 0) {
-      setError("Please enter a valid target amount");
-      return;
+      if (!amount || amount <= 0) {
+        setError("Please enter a valid target amount");
+        return;
+      }
+
+      setSettingTarget((prev) => ({ ...prev, [campaignId]: true }));
+
+      await axios.post(
+        `http://localhost:5000/api/campaigns/${campaignId}/set-target`,
+        { target_amount: amount },
+        { headers }
+      );
+
+      // ✅ Keep editing mode active
+      // ✅ Keep the value in the input so admin can see what was set
+
+      // Refresh campaigns so c.target_amount updates
+      await fetchCampaigns();
+
+      setError("");
+    } catch (err) {
+      console.error(err);
+      setError("Failed to set campaign target");
+    } finally {
+      setSettingTarget((prev) => ({ ...prev, [campaignId]: false }));
     }
-
-    setSettingTarget((prev) => ({ ...prev, [campaignId]: true }));
-
-    await axios.post(
-      `http://localhost:5000/api/campaigns/${campaignId}/set-target`,
-      { target_amount: amount },
-      { headers }
-    );
-
-    // ✅ DO NOT clear the input
-    // ✅ Keep the value so admin can see what was set
-
-    // Refresh campaigns so c.target_amount updates
-    await fetchCampaigns();
-
-    setError("");
-  } catch (err) {
-    console.error(err);
-    setError("Failed to set campaign target");
-  } finally {
-    setSettingTarget((prev) => ({ ...prev, [campaignId]: false }));
-  }
-};
+  };
 
   const handleSetAgentTarget = async (agentId) => {
     try {
@@ -322,7 +323,9 @@ const ManageCampaigns = () => {
                     </div>
                   </div>
 
-                  <div className="mb-4 flex justify-end">
+                  <div className="mb-4 flex justify-between items-end gap-4">
+                    
+
                     <Button
                       onClick={() => handleRechurnClick(c.id)}
                       className="bg-orange-100 text-orange-700 hover:bg-orange-200"

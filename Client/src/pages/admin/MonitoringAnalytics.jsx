@@ -14,6 +14,7 @@ const MonitoringAnalytics = () => {
   const [agentId, setAgentId] = useState("ALL");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
+  const [dateFilter, setDateFilter] = useState("thisMonth");
 
   const [agents, setAgents] = useState([]);
   const [campaigns, setCampaigns] = useState([]);
@@ -32,6 +33,46 @@ const MonitoringAnalytics = () => {
     setStartDate(formatDate(firstDay));
     setEndDate(formatDate(lastDay));
   }, []);
+
+  // Handle date filter presets
+  const handleDateFilterChange = (filter) => {
+    setDateFilter(filter);
+    const today = new Date();
+    const formatDate = (date) => date.toISOString().split("T")[0];
+    let start, end;
+
+    switch (filter) {
+      case "today":
+        start = formatDate(today);
+        end = formatDate(today);
+        break;
+      case "yesterday":
+        const yesterday = new Date(today);
+        yesterday.setDate(yesterday.getDate() - 1);
+        start = formatDate(yesterday);
+        end = formatDate(yesterday);
+        break;
+      case "thisWeek":
+        const weekStart = new Date(today);
+        weekStart.setDate(today.getDate() - today.getDay());
+        start = formatDate(weekStart);
+        end = formatDate(today);
+        break;
+      case "thisMonth":
+        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+        const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        start = formatDate(monthStart);
+        end = formatDate(monthEnd);
+        break;
+      case "custom":
+        return; // Don't change dates in custom mode
+      default:
+        return;
+    }
+
+    setStartDate(start);
+    setEndDate(end);
+  };
 
   // Fetch agents and campaigns on mount
   useEffect(() => {
@@ -118,6 +159,60 @@ const MonitoringAnalytics = () => {
         {/* FILTER BAR */}
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <p className="text-sm font-semibold text-slate-900 mb-4">Filters</p>
+
+          {/* DATE PRESET BUTTONS */}
+          <div className="mb-4 flex gap-2 flex-wrap">
+            <button
+              onClick={() => handleDateFilterChange("today")}
+              className={`px-4 py-2 text-xs font-medium rounded-lg transition ${
+                dateFilter === "today"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              Today
+            </button>
+            <button
+              onClick={() => handleDateFilterChange("yesterday")}
+              className={`px-4 py-2 text-xs font-medium rounded-lg transition ${
+                dateFilter === "yesterday"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              Yesterday
+            </button>
+            <button
+              onClick={() => handleDateFilterChange("thisWeek")}
+              className={`px-4 py-2 text-xs font-medium rounded-lg transition ${
+                dateFilter === "thisWeek"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              This Week
+            </button>
+            <button
+              onClick={() => handleDateFilterChange("thisMonth")}
+              className={`px-4 py-2 text-xs font-medium rounded-lg transition ${
+                dateFilter === "thisMonth"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              This Month
+            </button>
+            <button
+              onClick={() => setDateFilter("custom")}
+              className={`px-4 py-2 text-xs font-medium rounded-lg transition ${
+                dateFilter === "custom"
+                  ? "bg-blue-600 text-white"
+                  : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+              }`}
+            >
+              Custom
+            </button>
+          </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-4">
             {/* Campaign Filter */}

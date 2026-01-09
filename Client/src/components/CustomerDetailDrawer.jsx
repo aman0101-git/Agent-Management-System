@@ -88,6 +88,7 @@ const CustomerDetailDrawer = ({
   const [submitting, setSubmitting] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editingAgentCaseId, setEditingAgentCaseId] = useState(null);
+  const [ptpTarget, setPtpTarget] = useState("");
 
   useEffect(() => {
     if (isOpen && caseId) {
@@ -143,6 +144,7 @@ const CustomerDetailDrawer = ({
       setPromiseAmount("");
       setFollowUpDate("");
       setFollowUpTime("");
+      setPtpTarget("");
       setIsEditing(false);
     } finally {
       setLoading(false);
@@ -183,6 +185,7 @@ const CustomerDetailDrawer = ({
           followUpTime: requiresAmountAndDate(selectedDisposition)
             ? followUpTime
             : null,
+          ptpTarget: selectedDisposition === 'PTP' ? ptpTarget : null,
           isEdit: isEditing,
           agentCaseId: editingAgentCaseId,
         },
@@ -207,7 +210,8 @@ const CustomerDetailDrawer = ({
         }
       }
 
-      // Reload case details
+      // Reload case details and reset form
+      setPtpTarget("");
       await loadCaseDetails();
       onDispositionSubmitted?.();
 
@@ -483,6 +487,24 @@ const CustomerDetailDrawer = ({
                                 className="flex-1 border rounded px-2 py-1"
                               />
                             </div>
+
+                            {/* PTP TARGET SELECTION */}
+                            {selectedDisposition === 'PTP' && (
+                              <div>
+                                <label className="block text-xs font-medium text-slate-700 mb-1">PTP Target Disposition</label>
+                                <select
+                                  value={ptpTarget}
+                                  onChange={(e) => setPtpTarget(e.target.value)}
+                                  className="w-full border rounded px-3 py-2"
+                                >
+                                  <option value="">Select Target</option>
+                                  <option value="SIF">SIF - Settled In Full</option>
+                                  <option value="PIF">PIF - Paid In Full</option>
+                                  <option value="FCL">FCL - Foreclosure</option>
+                                  <option value="PRT">PRT - Part Payment</option>
+                                </select>
+                              </div>
+                            )}
                           </>
                         )}
 
@@ -503,6 +525,7 @@ const CustomerDetailDrawer = ({
                                 setPromiseAmount("");
                                 setFollowUpDate("");
                                 setFollowUpTime("");
+                                setPtpTarget("");
                               }}
                               className="px-4 py-2 text-xs rounded border border-slate-300 hover:bg-slate-100"
                             >

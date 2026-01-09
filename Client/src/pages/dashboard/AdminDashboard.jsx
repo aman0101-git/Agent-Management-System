@@ -43,14 +43,6 @@ const AdminDashboard = () => {
               hover: "hover:from-teal-600 hover:to-cyan-600",
             },
             {
-              title: "Data Allocation",
-              desc: "Upload monthly data and assign accounts.",
-              action: "Upload Monthly Data",
-              link: "/admin/upload-data",
-              base: "from-indigo-500 to-violet-500",
-              hover: "hover:from-indigo-600 hover:to-violet-600",
-            },
-            {
               title: "Agent Allocation",
               desc: "Assign agents to campaigns.",
               action: "Allocate Agents",
@@ -58,6 +50,14 @@ const AdminDashboard = () => {
               base: "from-emerald-500 to-teal-500",
               hover: "hover:from-emerald-600 hover:to-teal-600",
             },
+            {
+              title: "Data Allocation",
+              desc: "Upload monthly data and assign accounts.",
+              action: "Upload Monthly Data",
+              link: "/admin/upload-data",
+              base: "from-indigo-500 to-violet-500",
+              hover: "hover:from-indigo-600 hover:to-violet-600",
+            },            
             {
               title: "Campaign Management",
               desc: "Activate or deactivate campaigns.",
