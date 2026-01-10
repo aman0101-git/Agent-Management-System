@@ -164,6 +164,8 @@ export const getAgentCaseById = async (req, res) => {
         promise_amount,
         follow_up_date,
         follow_up_time,
+        payment_date,
+        payment_time,
         ptp_target,
         created_at
       FROM agent_dispositions
@@ -187,6 +189,8 @@ export const getAgentCaseById = async (req, res) => {
         promise_amount,
         follow_up_date,
         follow_up_time,
+        payment_date,
+        payment_time,
         ptp_target,
         edited_at
       FROM agent_dispositions_edit_history
@@ -195,6 +199,40 @@ export const getAgentCaseById = async (req, res) => {
       `,
       [agentCase.id]
     );
+
+    // Ensure follow_up_time is always a string in HH:mm:ss format
+    function formatTime(val) {
+      if (!val) return null;
+      if (typeof val === 'string') return val;
+      if (val instanceof Date) {
+        // Format as HH:mm:ss
+        return val.toTimeString().slice(0, 8);
+      }
+      return String(val);
+    }
+
+    // Format main case follow_up_time
+    if (row && 'follow_up_time' in row) {
+      row.follow_up_time = formatTime(row.follow_up_time);
+    }
+
+    // Format all dispositions follow_up_time
+    if (Array.isArray(dispositions)) {
+      for (const disp of dispositions) {
+        if ('follow_up_time' in disp) {
+          disp.follow_up_time = formatTime(disp.follow_up_time);
+        }
+      }
+    }
+
+    // Format all editHistory follow_up_time
+    if (Array.isArray(editHistory)) {
+      for (const edit of editHistory) {
+        if ('follow_up_time' in edit) {
+          edit.follow_up_time = formatTime(edit.follow_up_time);
+        }
+      }
+    }
 
     return res.json({
       case: row,
@@ -252,6 +290,7 @@ export const submitDisposition = async (req, res) => {
       followUpDate,
       followUpTime,
       ptpTarget,
+      paymentDate,
       isEdit,
     } = req.body;
 
@@ -270,31 +309,62 @@ export const submitDisposition = async (req, res) => {
       });
     }
 
-    // Rule-driven validation
-    const validationResult = validateDispositionData(disposition, {
-      amount: promiseAmount,
-      followUpDate,
-      followUpTime,
-      remarks,
-    });
+      // Rule-driven validation (strict)
+      const rule = DISPOSITION_RULES[disposition];
+      const errors = [];
 
-    if (!validationResult.valid) {
-      return res.status(400).json({
-        message: "Validation failed",
-        errors: validationResult.errors,
-      });
-    }
+      // Validate required fields strictly (no 0, empty, null)
+      if (rule.requires.amount && (!promiseAmount || isNaN(promiseAmount) || Number(promiseAmount) <= 0)) {
+        errors.push(`Amount is required for ${rule.code}`);
+      }
+      if (rule.requires.followUpDate && (!followUpDate || followUpDate === '' || followUpDate === '0')) {
+        errors.push(`Follow-up date is required for ${rule.code}`);
+      }
+      if (rule.requires.followUpTime && (!followUpTime || followUpTime === '' || followUpTime === '0')) {
+        errors.push(`Follow-up time is required for ${rule.code}`);
+      }
+      if (disposition === 'PTP' && (!ptpTarget || ptpTarget === '' || ptpTarget === '0')) {
+        errors.push('PTP target is required for PTP disposition');
+      }
 
-    // Validate time format if provided
-    if (followUpTime) {
-      const timeValidation = validateTimeFormat(followUpTime);
-      if (!timeValidation.valid) {
+
+      // For non-required fields, ignore them (set to null)
+      const safePromiseAmount = rule.requires.amount ? promiseAmount : null;
+      const safeFollowUpDate = rule.requires.followUpDate ? followUpDate : null;
+      const safeFollowUpTime = rule.requires.followUpTime ? followUpTime : null;
+      const safePtpTarget = disposition === 'PTP' ? ptpTarget : null;
+      // Only allow paymentDate for PIF, SIF, FCL, PRT
+      const paymentDateDispositions = ['PIF', 'SIF', 'FCL', 'PRT'];
+      const safePaymentDate = paymentDateDispositions.includes(disposition) ? paymentDate || null : null;
+
+      // Validate paymentDate for these dispositions
+      if (paymentDateDispositions.includes(disposition) && (!safePaymentDate || safePaymentDate === '')) {
+        errors.push('Payment date is required for ' + disposition);
+      }
+
+      // For dispositions that don't require amount, reject if sent
+      if (!rule.requires.amount && promiseAmount) {
+        errors.push(`${rule.code} should not have an amount`);
+      }
+      // For CBC, reject amount if sent
+      if (disposition === 'CBC' && promiseAmount) {
+        errors.push('CBC should not have an amount');
+      }
+
+      // Validate time format if provided
+      if (safeFollowUpTime) {
+        const timeValidation = validateTimeFormat(safeFollowUpTime);
+        if (!timeValidation.valid) {
+          errors.push(timeValidation.error);
+        }
+      }
+
+      if (errors.length > 0) {
         return res.status(400).json({
-          message: "Invalid follow-up time format",
-          error: timeValidation.error,
+          message: 'Validation failed',
+          errors,
         });
       }
-    }
 
     await conn.beginTransaction();
 
@@ -381,19 +451,6 @@ export const submitDisposition = async (req, res) => {
     // ==========================================
     // 4️⃣ PROCESS DISPOSITION DATA
     // ==========================================
-    
-    const rule = DISPOSITION_RULES[disposition];
-    
-    // Amount: Only include if disposition requires it; otherwise NULL
-    const dispositionAmount = rule.requires.amount ? promiseAmount : null;
-    
-    // Follow-up date/time: Only include if disposition requires it; otherwise NULL
-    const dispositionFollowUpDate = rule.requires.followUpDate ? followUpDate : null;
-    const dispositionFollowUpTime = rule.requires.followUpTime ? followUpTime : null;
-    
-    // PTP target: Only for PTP disposition
-    const dispositionPtpTarget = disposition === 'PTP' ? ptpTarget : null;
-
     await conn.query(
       `
       INSERT INTO agent_dispositions
@@ -406,19 +463,21 @@ export const submitDisposition = async (req, res) => {
         promise_amount,
         follow_up_date,
         follow_up_time,
+        payment_date,
         created_at
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `,
       [
         agentCase.id,
         agentId,
         disposition,
-        dispositionPtpTarget,
+        safePtpTarget,
         remarks || null,
-        dispositionAmount,
-        dispositionFollowUpDate,
-        dispositionFollowUpTime,
+        safePromiseAmount,
+        safeFollowUpDate,
+        safeFollowUpTime,
+        safePaymentDate,
       ]
     );
 
@@ -441,8 +500,8 @@ export const submitDisposition = async (req, res) => {
         `,
         [
           newStatus,
-          dispositionFollowUpDate,
-          dispositionFollowUpTime,
+          safeFollowUpDate,
+          safeFollowUpTime,
           agentCase.id,
         ]
       );
@@ -735,92 +794,66 @@ export const getAgentAnalytics = async (req, res) => {
 
     /* ===============================
        SECTION A: Call & PTP Overview
-       =============================== */
-        const [[ptpData]] = await pool.query(
+      // ==========================================
+      // 4️⃣ PROCESS DISPOSITION DATA
+      // ==========================================
+      await conn.query(
         `
-        SELECT
-          /* Calls attended = total disposition events */
-          COUNT(ad_all.id) AS calls_attended,
-
-          /* PTP customers = cases whose LATEST disposition is PTP */
-          COUNT(DISTINCT CASE WHEN latest.disposition = 'PTP' THEN latest.agent_case_id END) AS ptp_count,
-
-          /* Total PTP amount = sum of promise_amount ONLY if latest disposition is PTP */
-          COALESCE(SUM(CASE WHEN latest.disposition = 'PTP' THEN latest.promise_amount ELSE 0 END), 0)
-            AS total_ptp_amount
-
-        FROM agent_dispositions ad_all
-
-        /* Reduce to LATEST disposition per case */
-        LEFT JOIN (
-          SELECT ad.*
-          FROM agent_dispositions ad
-          JOIN (
-            SELECT agent_case_id, MAX(created_at) AS latest_time
-            FROM agent_dispositions
-            WHERE agent_id = ?
-              AND created_at BETWEEN ? AND ?
-            GROUP BY agent_case_id
-          ) x
-            ON x.agent_case_id = ad.agent_case_id
-          AND x.latest_time = ad.created_at
-        ) latest
-          ON latest.agent_case_id = ad_all.agent_case_id
-
-        WHERE ad_all.agent_id = ?
-          AND ad_all.created_at BETWEEN ? AND ?
+        INSERT INTO agent_dispositions
+        (
+          agent_case_id,
+          agent_id,
+          disposition,
+          ptp_target,
+          remarks,
+          promise_amount,
+          follow_up_date,
+          follow_up_time,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
         `,
         [
-          agentId, startDateStr, endDateStr, // for latest subquery
-          agentId, startDateStr, endDateStr  // for calls_attended
+          agentCase.id,
+          agentId,
+          disposition,
+          safePtpTarget,
+          remarks || null,
+          safePromiseAmount,
+          safeFollowUpDate,
+          safeFollowUpTime,
         ]
       );
-
-    /* ===============================
-       SECTION B: Collection Breakdown
-       =============================== */
-    const [collectionBreakdown] = await pool.query(
-      `
-      SELECT
-        disposition,
-        COUNT(*) AS customer_count,
-        COALESCE(SUM(promise_amount), 0) AS total_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN (
-          SELECT agent_case_id, MAX(created_at) AS latest_time
-          FROM agent_dispositions
-          WHERE agent_id = ?
-            AND created_at BETWEEN ? AND ?
-          GROUP BY agent_case_id
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-         AND latest.latest_time = ad.created_at
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
-      GROUP BY disposition
-      `,
-      [agentId, startDateStr, endDateStr]
-    );
-
-    /* ===============================
-       SECTION C: Total Collection Summary (Time-filtered)
-       =============================== */
-    const [[collectionSummary]] = await pool.query(
-      `
-      SELECT
-        COUNT(*) AS total_collected_count,
-        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN (
-          SELECT agent_case_id, MAX(created_at) AS latest_time
-          FROM agent_dispositions
-          WHERE agent_id = ?
-            AND created_at BETWEEN ? AND ?
-          GROUP BY agent_case_id
+      // ==========================================
+      // 4️⃣ PROCESS DISPOSITION DATA
+      // ==========================================
+      await conn.query(
+        `
+        INSERT INTO agent_dispositions
+        (
+          agent_case_id,
+          agent_id,
+          disposition,
+          ptp_target,
+          remarks,
+          promise_amount,
+          follow_up_date,
+          follow_up_time,
+          created_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
+        `,
+        [
+          agentCase.id,
+          agentId,
+          disposition,
+          safePtpTarget,
+          remarks || null,
+          safePromiseAmount,
+          safeFollowUpDate,
+          safeFollowUpTime,
+        ]
+      );
         ) latest
           ON latest.agent_case_id = ad.agent_case_id
          AND latest.latest_time = ad.created_at
@@ -872,6 +905,30 @@ export const getAgentAnalytics = async (req, res) => {
       [agentId, monthlyStartStr, monthlyEndStr]
     );
 
+
+    // Fetch collection breakdown from DB
+    const [collectionBreakdown] = await pool.query(
+      `
+        SELECT disposition, COUNT(DISTINCT agent_case_id) AS customer_count, COALESCE(SUM(promise_amount), 0) AS total_amount
+        FROM (
+          SELECT ad.*
+          FROM agent_dispositions ad
+          JOIN (
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions
+            WHERE agent_id = ?
+              AND created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) latest
+            ON latest.agent_case_id = ad.agent_case_id
+           AND latest.latest_time = ad.created_at
+        ) latest_cases
+        WHERE disposition IN ('PIF','SIF','FCL','PRT')
+        GROUP BY disposition
+      `,
+      [agentId, startDateStr, endDateStr]
+    );
+
     // Format collection breakdown
     const formattedBreakdown = {
       PIF: { customer_count: 0, total_amount: 0 },
@@ -894,6 +951,42 @@ export const getAgentAnalytics = async (req, res) => {
       achievementPercent = ((monthlyActual / targetAmount) * 100).toFixed(2);
     }
 
+    // Fetch PTP overview data
+    const [[ptpData]] = await pool.query(
+      `
+        SELECT 
+          COUNT(*) AS calls_attended,
+          SUM(CASE WHEN disposition = 'PTP' THEN 1 ELSE 0 END) AS ptp_count,
+          COALESCE(SUM(CASE WHEN disposition = 'PTP' THEN promise_amount ELSE 0 END), 0) AS total_ptp_amount
+        FROM agent_dispositions
+        WHERE agent_id = ?
+          AND created_at BETWEEN ? AND ?
+      `,
+      [agentId, startDateStr, endDateStr]
+    );
+
+    // Fetch collection summary for the filtered period
+    const [[collectionSummary]] = await pool.query(
+      `
+        SELECT COUNT(*) AS total_collected_count, COALESCE(SUM(promise_amount), 0) AS total_collected_amount
+        FROM (
+          SELECT ad.*
+          FROM agent_dispositions ad
+          JOIN (
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions
+            WHERE agent_id = ?
+              AND created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) latest
+            ON latest.agent_case_id = ad.agent_case_id
+           AND latest.latest_time = ad.created_at
+        ) latest_cases
+        WHERE disposition IN ('PIF','SIF','FCL','PRT')
+      `,
+      [agentId, startDateStr, endDateStr]
+    );
+
     res.json({
       timeFilter,
       dateRange: { start: startDateStr, end: endDateStr },
@@ -904,8 +997,8 @@ export const getAgentAnalytics = async (req, res) => {
       },
       breakdown: formattedBreakdown,
       summary: {
-        total_collected_count: collectionSummary.total_collected_count || 0,
-        total_collected_amount: collectionSummary.total_collected_amount || 0,
+        total_collected_count: collectionSummary?.total_collected_count || 0,
+        total_collected_amount: collectionSummary?.total_collected_amount || 0,
       },
       // Monthly summary (ALWAYS calendar month, independent of filter)
       // Now using agent_targets instead of campaign targets

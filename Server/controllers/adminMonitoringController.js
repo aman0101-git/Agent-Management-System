@@ -191,17 +191,21 @@ export const getMonitoringAnalytics = async (req, res) => {
     /* ===============================
        SECTION E: MONTHLY TARGET
        =============================== */
-    let targetAmount = 0;
 
+    let targetAmount = 0;
     if (campaign_id !== "ALL") {
+      // Support multi-select: sum target_amount for all selected campaigns
+      const campaignIds = campaign_id.split(",").map((id) => id.trim());
+      const placeholders = campaignIds.map(() => "?").join(",");
       const [[row]] = await pool.query(
-        `
-        SELECT target_amount
-        FROM campaigns
-        WHERE id = ?
-        LIMIT 1
-        `,
-        [campaign_id]
+        `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE id IN (${placeholders})`,
+        campaignIds
+      );
+      targetAmount = row?.target_amount || 0;
+    } else {
+      // If ALL, sum all campaign targets
+      const [[row]] = await pool.query(
+        `SELECT SUM(target_amount) AS target_amount FROM campaigns`
       );
       targetAmount = row?.target_amount || 0;
     }

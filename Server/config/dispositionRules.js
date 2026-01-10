@@ -32,21 +32,6 @@ export const DISPOSITION_RULES = {
     },
   },
 
-  BRP: {
-    code: 'BRP',
-    name: 'Broken Promise',
-    description: 'Customer broke their previous promise to pay',
-    resultStatus: 'FOLLOW_UP',
-    requires: {
-      amount: true,
-      followUpDate: true,
-      followUpTime: true,
-    },
-    optional: {
-      remarks: true,
-    },
-  },
-
   PRT: {
     code: 'PRT',
     name: 'Part Payment',
@@ -54,8 +39,10 @@ export const DISPOSITION_RULES = {
     resultStatus: 'FOLLOW_UP',
     requires: {
       amount: true,
-      followUpDate: true,
-      followUpTime: true,
+      followUpDate: false,
+      followUpTime: false,
+      paymentDate: true,
+      paymentTime: true,
     },
     optional: {
       remarks: true,
@@ -81,6 +68,21 @@ export const DISPOSITION_RULES = {
   // IN-PROGRESS STATUS DISPOSITIONS
   // ============================================
   
+  BRP: {
+    code: 'BRP',
+    name: 'Broken Promise',
+    description: 'Customer broke their previous promise to pay',
+    resultStatus: 'IN_PROGRESS',
+    requires: {
+      amount: false,
+      followUpDate: false,
+      followUpTime: false,
+    },
+    optional: {
+      remarks: true,
+    },
+  },
+
   RTP: {
     code: 'RTP',
     name: 'Refuse To Pay',
@@ -270,13 +272,17 @@ export function validateDispositionData(dispositionCode, data) {
   if (rule.requires.amount && (!data.amount || isNaN(data.amount) || Number(data.amount) <= 0)) {
     errors.push(`Amount is required for ${rule.code}`);
   }
-
   if (rule.requires.followUpDate && !data.followUpDate) {
     errors.push(`Follow-up date is required for ${rule.code}`);
   }
-
   if (rule.requires.followUpTime && !data.followUpTime) {
     errors.push(`Follow-up time is required for ${rule.code}`);
+  }
+  if (rule.requires.paymentDate && !data.paymentDate) {
+    errors.push(`Payment date is required for ${rule.code}`);
+  }
+  if (rule.requires.paymentTime && !data.paymentTime) {
+    errors.push(`Payment time is required for ${rule.code}`);
   }
 
   // For dispositions that don't require amount, enforce it's NULL
