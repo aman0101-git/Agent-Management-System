@@ -160,43 +160,44 @@ const UploadData = () => {
           <h3 className="mb-3 font-medium text-slate-800">
             Active Campaigns
           </h3>
-
-          {campaigns.map((c) => (
-            <div
-              key={c.id}
-              className="mb-2 flex items-center justify-between rounded-lg border bg-white px-3 py-2 shadow-sm"
-            >
-              {editId === c.id ? (
-                <>
-                  <input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="flex-1 rounded border px-2 py-1 text-sm"
-                  />
-                  <Button
-                    size="sm"
-                    className="bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700"
-                    onClick={() => handleEditSave(c.id)}
-                  >
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditId(null)}
-                  >
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <p className="font-medium text-slate-700">
-                    {c.campaign_name}
-                  </p>
-                </>
-              )}
-            </div>
-          ))}
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+            {campaigns.map((c) => (
+              <div
+                key={c.id}
+                className="mb-2 flex items-center justify-between rounded-lg border bg-white px-3 py-2 shadow-sm"
+              >
+                {editId === c.id ? (
+                  <>
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="flex-1 rounded border px-2 py-1 text-sm"
+                    />
+                    <Button
+                      size="sm"
+                      className="bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700"
+                      onClick={() => handleEditSave(c.id)}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-slate-700">
+                      {c.campaign_name}
+                    </p>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* UPLOAD SECTION */}

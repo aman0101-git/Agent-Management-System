@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import axios from "axios";
+import { useNavigate } from "react-router-dom";
 
 const CampaignAgents = () => {
   const { token } = useAuth();
@@ -12,6 +13,7 @@ const CampaignAgents = () => {
   const [agents, setAgents] = useState([]);
   const [selectedCampaign, setSelectedCampaign] = useState("");
   const [assignedAgents, setAssignedAgents] = useState([]);
+  const navigate = useNavigate();
 
   useEffect(() => {
     const headersLocal = { Authorization: `Bearer ${token}` };
@@ -69,35 +71,56 @@ const CampaignAgents = () => {
   const isAgentAssigned = (agentId) =>
     assignedAgents.some((a) => a.id === agentId);
 
+  const handleSaveAndRedirect = () => {
+    if (!selectedCampaign) {
+      setError("Please select a campaign before saving");
+      return;
+    }
+
+    // Data is already saved via assign/remove APIs
+    navigate("/admin/dashboard");
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 p-6">
       <div className="mx-auto max-w-3xl rounded-2xl border bg-white p-6 shadow-xl">
-        <h2 className="text-xl font-semibold text-slate-900 mb-6">
-          Campaign Agent Allocation
-        </h2>
-
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
             {error}
           </div>
         )}
 
-        {/* Campaign selector */}
-        <select
-          className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-400/40 transition"
-          value={selectedCampaign}
-          onChange={(e) => {
-            setSelectedCampaign(e.target.value);
-            loadAssignedAgents(e.target.value);
-          }}
-        >
-          <option value="">Select Campaign</option>
-          {campaigns.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.campaign_name}
-            </option>
-          ))}
-        </select>
+        <div className="mb-6 flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-slate-900">
+            Campaign Agent Allocation
+          </h2>
+
+          <Button
+            className="bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800"
+            onClick={handleSaveAndRedirect}
+          >
+            Save
+          </Button>
+        </div>
+
+        {/* Active Campaigns - fixed height, scrollable */}
+        <div className="mb-4 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+          <select
+            className="w-full bg-transparent px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-400/40 transition outline-none"
+            value={selectedCampaign}
+            onChange={(e) => {
+              setSelectedCampaign(e.target.value);
+              loadAssignedAgents(e.target.value);
+            }}
+          >
+            <option value="">Select Campaign</option>
+            {campaigns.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.campaign_name}
+              </option>
+            ))}
+          </select>
+        </div>
 
         {selectedCampaign && (
           <>

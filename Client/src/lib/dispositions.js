@@ -11,26 +11,20 @@ export const DISPOSITIONS = {
     status: 'FOLLOW_UP',
     showAmountAndDate: true,
   },
-  BRP: {
-    code: 'BRP',
-    name: 'Broken Promise',
-    description: 'Customer broke their previous promise to pay',
-    status: 'FOLLOW_UP',
-    showAmountAndDate: true,
-  },
   PRT: {
     code: 'PRT',
     name: 'Part Payment',
     description: 'Customer made a partial payment',
     status: 'FOLLOW_UP',
-    showAmountAndDate: true,
+    showAmountAndDate: true, // Amount and follow-up date/time required
+    showPaymentDate: true,   // Payment date/time also required
   },
   FCL: {
     code: 'FCL',
     name: 'Foreclosure',
     description: 'Loan foreclosure initiated',
     status: 'FOLLOW_UP',
-    showAmountAndDate: true,
+    showAmountAndDate: 'amountOnly', // Only amount required
   },
   CBC: {
     code: 'CBC',
@@ -41,6 +35,13 @@ export const DISPOSITIONS = {
   },
 
   // IN_PROGRESS Status - NO Date-Time and Amount
+  BRP: {
+    code: 'BRP',
+    name: 'Broken Promise',
+    description: 'Customer broke their previous promise to pay',
+    status: 'IN_PROGRESS',
+    showAmountAndDate: false,
+  },
   RTP: {
     code: 'RTP',
     name: 'Refuse To Pay',
@@ -104,14 +105,14 @@ export const DISPOSITIONS = {
     name: 'Settle In Full',
     description: 'Settlement arrangement for full payment',
     status: 'DONE',
-    showAmountAndDate: true,
+    showAmountAndDate: 'amountOnly', // Only amount required
   },
   PIF: {
     code: 'PIF',
     name: 'Paid In Full',
     description: 'Customer has paid the entire amount',
     status: 'DONE',
-    showAmountAndDate: true,
+    showAmountAndDate: 'amountOnly', // Only amount required
   },
 };
 
@@ -124,9 +125,15 @@ export const requiresAmountAndDate = (dispositionCode) => {
   return val === true || val === 'dateOnly';
 };
 
-// ISSUE #9 FIX: New helper to check if amount is required
+// Returns true if disposition requires payment date/time (for PRT, PIF, SIF, FCL)
+export const requiresPaymentDate = (dispositionCode) => {
+  return !!DISPOSITIONS[dispositionCode]?.showPaymentDate;
+};
+
+// Returns true if disposition requires amount (including 'amountOnly')
 export const requiresAmount = (dispositionCode) => {
-  return DISPOSITIONS[dispositionCode]?.showAmountAndDate === true;
+  const val = DISPOSITIONS[dispositionCode]?.showAmountAndDate;
+  return val === true || val === 'amountOnly';
 };
 
 // ISSUE #9 FIX: New helper to check if only date is required (not amount)

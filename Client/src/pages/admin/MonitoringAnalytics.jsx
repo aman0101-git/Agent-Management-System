@@ -35,44 +35,10 @@ const MonitoringAnalytics = () => {
     setEndDate(formatDate(lastDay));
   }, []);
 
-  // Handle date filter presets
+  // Handle date filter presets (no frontend date calculation)
   const handleDateFilterChange = (filter) => {
     setDateFilter(filter);
-    const today = new Date();
-    const formatDate = (date) => date.toISOString().split("T")[0];
-    let start, end;
-
-    switch (filter) {
-      case "today":
-        start = formatDate(today);
-        end = formatDate(today);
-        break;
-      case "yesterday":
-        const yesterday = new Date(today);
-        yesterday.setDate(yesterday.getDate() - 1);
-        start = formatDate(yesterday);
-        end = formatDate(yesterday);
-        break;
-      case "thisWeek":
-        const weekStart = new Date(today);
-        weekStart.setDate(today.getDate() - today.getDay());
-        start = formatDate(weekStart);
-        end = formatDate(today);
-        break;
-      case "thisMonth":
-        const monthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-        const monthEnd = new Date(today.getFullYear(), today.getMonth() + 1, 0);
-        start = formatDate(monthStart);
-        end = formatDate(monthEnd);
-        break;
-      case "custom":
-        return; // Don't change dates in custom mode
-      default:
-        return;
-    }
-
-    setStartDate(start);
-    setEndDate(end);
+    // Do not calculate or set start/end dates for presets; backend will handle
   };
 
   // Fetch agents and campaigns on mount
@@ -262,110 +228,105 @@ const MonitoringAnalytics = () => {
             </button>
           </div>
 
-          {/* Date Inputs */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-2">
-                Start Date
-              </label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-slate-700 mb-2">
-                End Date
-              </label>
-              <input
-                type="date"
-                value={endDate}
-                onChange={(e) => setEndDate(e.target.value)}
-                className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-              />
-            </div>
-          </div>
-
-          {/* ISSUE #5 FIX: Campaign Multi-Select with Checkboxes */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <label className="block text-sm font-medium text-slate-700">
-                Campaigns
-              </label>
-              <button
-                onClick={selectAllCampaigns}
-                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-              >
-                {selectedCampaignIds.length === campaigns.length
-                  ? "Deselect All"
-                  : "Select All"}
-              </button>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {campaigns.map((c) => (
-                <label
-                  key={c.id}
-                  className="flex items-center gap-2 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedCampaignIds.includes(c.id)}
-                    onChange={() => toggleCampaign(c.id)}
-                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-slate-700">
-                    {c.campaign_name}
-                  </span>
+          {/* Date Inputs: Only visible when Custom is selected */}
+          {dateFilter === "custom" && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-2">
+                  Start Date
                 </label>
-              ))}
-            </div>
-          </div>
-
-          {/* ISSUE #5 FIX: Agent Multi-Select with Checkboxes */}
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <label className="block text-sm font-medium text-slate-700">
-                Agents
-              </label>
-              <button
-                onClick={selectAllAgents}
-                className="text-xs text-blue-600 hover:text-blue-700 font-medium"
-              >
-                {selectedAgentIds.length === agents.length
-                  ? "Deselect All"
-                  : "Select All"}
-              </button>
-            </div>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-              {agents.map((a) => (
-                <label
-                  key={a.id}
-                  className="flex items-center gap-2 cursor-pointer"
-                >
-                  <input
-                    type="checkbox"
-                    checked={selectedAgentIds.includes(a.id)}
-                    onChange={() => toggleAgent(a.id)}
-                    className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
-                  />
-                  <span className="text-sm text-slate-700">{a.username}</span>
+                <input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => setStartDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-2">
+                  End Date
                 </label>
-              ))}
+                <input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => setEndDate(e.target.value)}
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Apply Button */}
-          <div className="flex gap-2">
-            <Button
-              onClick={loadAnalytics}
-              disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
-            >
-              {loading ? "Loading..." : "Apply Filters"}
-            </Button>
+
+          {/* Campaigns, Agents, and Apply Filter in one row with scrollable containers */}
+          <div className="flex flex-col md:flex-row gap-4 items-start mb-6">
+            {/* Campaigns */}
+            <div className="flex-1 min-w-[180px]">
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-slate-700">Campaigns</label>
+                <button
+                  onClick={selectAllCampaigns}
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  {selectedCampaignIds.length === campaigns.length ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+              <div className="max-h-32 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-2 flex flex-col gap-2">
+                {campaigns.map((c) => (
+                  <label
+                    key={c.id}
+                    className="flex items-center gap-2 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedCampaignIds.includes(c.id)}
+                      onChange={() => toggleCampaign(c.id)}
+                      className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{c.campaign_name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Agents */}
+            <div className="flex-1 min-w-[180px]">
+              <div className="flex items-center justify-between mb-2">
+                <label className="block text-sm font-medium text-slate-700">Agents</label>
+                <button
+                  onClick={selectAllAgents}
+                  className="text-xs text-blue-600 hover:text-blue-700 font-medium"
+                >
+                  {selectedAgentIds.length === agents.length ? "Deselect All" : "Select All"}
+                </button>
+              </div>
+              <div className="max-h-32 overflow-y-auto rounded border border-slate-200 bg-slate-50 p-2 flex flex-col gap-2">
+                {agents.map((a) => (
+                  <label
+                    key={a.id}
+                    className="flex items-center gap-2 cursor-pointer"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={selectedAgentIds.includes(a.id)}
+                      onChange={() => toggleAgent(a.id)}
+                      className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
+                    />
+                    <span className="text-sm text-slate-700">{a.username}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* Apply Button */}
+            <div className="flex items-end pb-2">
+              <Button
+                onClick={loadAnalytics}
+                disabled={loading}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-medium"
+              >
+                {loading ? "Loading..." : "Apply Filters"}
+              </Button>
+            </div>
           </div>
 
           {error && (

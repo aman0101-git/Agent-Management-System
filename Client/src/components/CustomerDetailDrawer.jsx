@@ -8,7 +8,7 @@ import {
   fetchCustomerVisitHistory,
 } from "@/api/agentApi";
 import { useAuth } from "@/context/AuthContext";
-import { DISPOSITIONS, requiresAmountAndDate, requiresAmount, requiresDateOnly } from "@/lib/dispositions";
+import { DISPOSITIONS, requiresAmountAndDate, requiresAmount, requiresDateOnly, requiresPaymentDate } from "@/lib/dispositions";
 
 /* ---------- Reusable UI ---------- */
 
@@ -105,6 +105,11 @@ const CustomerDetailDrawer = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editingAgentCaseId, setEditingAgentCaseId] = useState(null);
   const [ptpTarget, setPtpTarget] = useState("");
+  const [paymentDate, setPaymentDate] = useState("");
+  const [paymentTime, setPaymentTime] = useState("");
+  // Helper: should show payment date/time field
+  const paymentDateDispositions = ['PIF', 'SIF', 'FCL'];
+  const shouldShowPaymentDate = paymentDateDispositions.includes(selectedDisposition);
 
   useEffect(() => {
     if (isOpen && caseId) {
@@ -195,15 +200,18 @@ const CustomerDetailDrawer = ({
       }
     }
 
+    // Validate payment date/time for required dispositions
+    if ((shouldShowPaymentDate || (selectedDisposition === 'PRT' && requiresPaymentDate('PRT'))) && (!paymentDate || !paymentTime)) {
+      alert('Payment date and time are required for this disposition');
+      return;
+    }
+
     try {
       setSubmitting(true);
 
       // ============================================
       // PREPARE SUBMISSION DATA
       // ============================================
-      
-      // Time input type="time" provides HH:mm format (e.g., "14:30")
-      // Don't parse or transform it - send as-is to backend
       const submissionData = {
         disposition: selectedDisposition,
         remarks,
@@ -211,6 +219,8 @@ const CustomerDetailDrawer = ({
         followUpDate: requiresAmountAndDate(selectedDisposition) ? followUpDate : null,
         followUpTime: requiresAmountAndDate(selectedDisposition) ? followUpTime : null,
         ptpTarget: selectedDisposition === 'PTP' ? ptpTarget : null,
+        paymentDate: (shouldShowPaymentDate || (selectedDisposition === 'PRT' && requiresPaymentDate('PRT'))) ? paymentDate : null,
+        paymentTime: (shouldShowPaymentDate || (selectedDisposition === 'PRT' && requiresPaymentDate('PRT'))) ? paymentTime : null,
         isEdit: isEditing,
         agentCaseId: editingAgentCaseId,
       };
@@ -409,6 +419,11 @@ const CustomerDetailDrawer = ({
                                 Follow-up: {formatFollowUp(latest.follow_up_date, latest.follow_up_time)}
                               </p>
                             )}
+                            {latest.payment_date && (
+                              <p className="text-sm">
+                                Payment Date: {formatFollowUp(latest.payment_date, latest.payment_time)}
+                              </p>
+                            )}
                           </div>
                         );
                       })()}
@@ -467,7 +482,13 @@ const CustomerDetailDrawer = ({
                                   {d.follow_up_date && (
                                     <p>
                                       <span className="font-medium">Follow-up:</span>{" "}
-                                      {formatFollowUp(d.follow_up_date)} {formatFollowUp(d.follow_up_time)}
+                                      {formatFollowUp(d.follow_up_date, d.follow_up_time)}
+                                    </p>
+                                  )}
+                                  {d.payment_date && (
+                                    <p>
+                                      <span className="font-medium">Payment Date:</span>{" "}
+                                      {formatFollowUp(d.payment_date, d.payment_time)}
                                     </p>
                                   )}
                                 </div>
@@ -488,6 +509,7 @@ const CustomerDetailDrawer = ({
                       className="col-span-full grid grid-cols-1 md:grid-cols-2 gap-6"
                     >
                       <div className="space-y-3 text-sm">
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Select Disposition</label>
                         <select
                           value={selectedDisposition}
                           onChange={(e) =>
@@ -502,7 +524,8 @@ const CustomerDetailDrawer = ({
                             </option>
                           ))}
                         </select>
-
+                        
+                        <label className="block text-xs font-medium text-slate-700 mb-1">Remarks</label>
                         <textarea
                           value={remarks}
                           onChange={(e) => setRemarks(e.target.value)}
@@ -513,33 +536,63 @@ const CustomerDetailDrawer = ({
                       </div>
 
                       <div className="space-y-3 text-sm">
-                        {/* ISSUE #9 FIX: Conditionally show amount field - NOT for CBC */}
+                        
+                        {/* Conditionally show amount field */}
                         {requiresAmount(selectedDisposition) && (
-                          <input
-                            type="number"
-                            placeholder="Promise Amount (₹)"
-                            value={promiseAmount}
-                            onChange={(e) => setPromiseAmount(e.target.value)}
-                            className="w-full border rounded px-3 py-2"
-                            step="0.01"
-                          />
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">
+                              Promise Amount
+                            </label>
+                            <input
+                              type="number"
+                              placeholder="Promise Amount (₹)"
+                              value={promiseAmount}
+                              onChange={(e) => setPromiseAmount(e.target.value)}
+                              className="w-full border rounded px-3 py-2"
+                              step="0.01"
+                            />
+                          </div>
                         )}
 
-                        {/* Show date-time for dispositions that need them */}
+                        {/* Show follow-up date/time for all that require it (including PRT) */}
                         {requiresAmountAndDate(selectedDisposition) && (
-                          <div className="flex gap-3">
-                            <input
-                              type="date"
-                              value={followUpDate}
-                              onChange={(e) => setFollowUpDate(e.target.value)}
-                              className="flex-1 border rounded px-2 py-1"
-                            />
-                            <input
-                              type="time"
-                              value={followUpTime}
-                              onChange={(e) => setFollowUpTime(e.target.value)}
-                              className="flex-1 border rounded px-2 py-1"
-                            />
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Follow up Date and Time</label>
+                            <div className="flex gap-3">
+                              <input
+                                type="date"
+                                value={followUpDate}
+                                onChange={(e) => setFollowUpDate(e.target.value)}
+                                className="flex-1 border rounded px-2 py-1"
+                              />
+                              <input
+                                type="time"
+                                value={followUpTime}
+                                onChange={(e) => setFollowUpTime(e.target.value)}
+                                className="flex-1 border rounded px-2 py-1"
+                              />
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Payment Date and Time for PIF, SIF, FCL, and PRT (PRT handled separately) */}
+                        {(shouldShowPaymentDate || (selectedDisposition === 'PRT' && requiresPaymentDate('PRT'))) && (
+                          <div>
+                            <label className="block text-xs font-medium text-slate-700 mb-1">Payment Date and Time</label>
+                            <div className="flex gap-3">
+                              <input
+                                type="date"
+                                value={paymentDate}
+                                onChange={(e) => setPaymentDate(e.target.value)}
+                                className="flex-1 border rounded px-2 py-1"
+                              />
+                              <input
+                                type="time"
+                                value={paymentTime}
+                                onChange={(e) => setPaymentTime(e.target.value)}
+                                className="flex-1 border rounded px-2 py-1"
+                              />
+                            </div>
                           </div>
                         )}
 
@@ -561,7 +614,7 @@ const CustomerDetailDrawer = ({
                           </div>
                         )}
 
-                        {!requiresAmountAndDate(selectedDisposition) && selectedDisposition && (
+                        {!requiresAmountAndDate(selectedDisposition) && !shouldShowPaymentDate && selectedDisposition && (
                           <p className="text-xs text-slate-500 italic">
                             No amount or date-time required for this disposition
                           </p>
@@ -579,6 +632,8 @@ const CustomerDetailDrawer = ({
                                 setFollowUpDate("");
                                 setFollowUpTime("");
                                 setPtpTarget("");
+                                setPaymentDate("");
+                                setPaymentTime("");
                               }}
                               className="px-4 py-2 text-xs rounded border border-slate-300 hover:bg-slate-100"
                             >
