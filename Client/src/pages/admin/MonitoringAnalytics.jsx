@@ -35,10 +35,41 @@ const MonitoringAnalytics = () => {
     setEndDate(formatDate(lastDay));
   }, []);
 
-  // Handle date filter presets (no frontend date calculation)
+  // Handle date filter presets (calculate and set dates in frontend)
   const handleDateFilterChange = (filter) => {
     setDateFilter(filter);
-    // Do not calculate or set start/end dates for presets; backend will handle
+    const today = new Date();
+    let start, end;
+    switch (filter) {
+      case "today":
+        start = end = today;
+        break;
+      case "yesterday":
+        start = new Date(today);
+        start.setDate(today.getDate() - 1);
+        end = new Date(start);
+        break;
+      case "thisWeek": {
+        const day = today.getDay(); // 0 (Sun) - 6 (Sat)
+        const diff = today.getDate() - day + (day === 0 ? -6 : 1); // Monday as first day
+        start = new Date(today.setDate(diff));
+        start.setHours(0, 0, 0, 0);
+        end = new Date();
+        break;
+      }
+      case "thisMonth":
+        start = new Date(today.getFullYear(), today.getMonth(), 1);
+        end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
+        break;
+      case "custom":
+        // Do not change dates, allow manual input
+        return;
+      default:
+        return;
+    }
+    const formatDate = (date) => date.toISOString().split("T")[0];
+    setStartDate(formatDate(start));
+    setEndDate(formatDate(end));
   };
 
   // Fetch agents and campaigns on mount
