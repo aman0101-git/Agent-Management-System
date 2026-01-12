@@ -83,6 +83,7 @@ export const getAgentCaseById = async (req, res) => {
         c.dpd,
         c.pos,
         c.insl_amt,
+        c.inst_over,
         c.amt_outst,
         c.tenure,
         c.bom_bucket,
@@ -112,7 +113,6 @@ export const getAgentCaseById = async (req, res) => {
       FROM coll_data c
       LEFT JOIN agent_cases ac
         ON ac.coll_data_id = c.id
-      /* ISSUE #12 FIX: Ensure agent is assigned to this campaign */
       INNER JOIN campaign_agents ca
         ON ca.agent_id = ? AND ca.campaign_id = c.campaign_id
       WHERE c.id = ?

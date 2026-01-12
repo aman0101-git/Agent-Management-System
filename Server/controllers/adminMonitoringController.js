@@ -55,7 +55,6 @@ export const getMonitoringAnalytics = async (req, res) => {
 
     /* ===============================
        3. DYNAMIC FILTERS (SCHEMA-SAFE)
-       ISSUE #5 FIX: Support array-based filters (comma-separated)
        =============================== */
     let whereClause = `
       WHERE u.role = 'AGENT'

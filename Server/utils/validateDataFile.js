@@ -6,7 +6,6 @@ export const REQUIRED_COLUMNS = [
   "MOBILE NUMBER",
   "POS",
   "INST AMT",
-  "STATUS"
 ];
 
 // ================= NORMALIZATION =================
