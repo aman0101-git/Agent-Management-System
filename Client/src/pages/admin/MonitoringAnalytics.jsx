@@ -99,7 +99,6 @@ const MonitoringAnalytics = () => {
     }
   }, [startDate, endDate, token]);
 
-  // ISSUE #5 FIX: Build campaign and agent filter strings
   const getCampaignFilterParam = () => {
     if (selectedCampaignIds.length === 0) return "ALL";
     return selectedCampaignIds.join(",");
@@ -130,7 +129,6 @@ const MonitoringAnalytics = () => {
     }
   };
 
-  // ISSUE #5 FIX: Toggle campaign checkbox
   const toggleCampaign = (campaignId) => {
     setSelectedCampaignIds((prev) =>
       prev.includes(campaignId)
@@ -139,7 +137,6 @@ const MonitoringAnalytics = () => {
     );
   };
 
-  // ISSUE #5 FIX: Toggle agent checkbox
   const toggleAgent = (agentId) => {
     setSelectedAgentIds((prev) =>
       prev.includes(agentId)
@@ -148,7 +145,6 @@ const MonitoringAnalytics = () => {
     );
   };
 
-  // ISSUE #5 FIX: Select all campaigns
   const selectAllCampaigns = () => {
     if (selectedCampaignIds.length === campaigns.length) {
       setSelectedCampaignIds([]);
@@ -157,7 +153,6 @@ const MonitoringAnalytics = () => {
     }
   };
 
-  // ISSUE #5 FIX: Select all agents
   const selectAllAgents = () => {
     if (selectedAgentIds.length === agents.length) {
       setSelectedAgentIds([]);

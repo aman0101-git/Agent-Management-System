@@ -328,11 +328,13 @@ const CustomerDetailDrawer = ({
                   <Field label="Loan ID" value={caseData.loan_id} />
                   <Field label="Branch" value={caseData.branch_name} />
                   <Field label="Product" value={caseData.product_code} />
-                  <Field label="Penalty Over" value={caseData.penal_over} />
                   <Field label="Loan Status" value={caseData.loan_status} />
                   <Field label="DPD" value={caseData.dpd} />
                   <Field label="POS" value={caseData.pos} />
                   <Field label="Installment Amount" value={caseData.insl_amt} />
+                  <Field label="Installment Over" value={caseData.inst_over} />
+                  <Field label="Penalty Over" value={caseData.penal_over} />
+                  <Field label="Amount Finance" value={caseData.amount_finance} />
                   <Field label="Bom Bucket" value={caseData.bom_bucket} />
                   <Field label="Tenure" value={caseData.tenure} />
                 </Section>
@@ -343,16 +345,16 @@ const CustomerDetailDrawer = ({
                   <Field label="Allocation Date" value={formatFollowUp(caseData.allocation_date)} />
                   <Field label="First Call" value={formatFollowUp(caseData.first_call_at)} />
                   <Field label="Last Call" value={formatFollowUp(caseData.last_call_at)} />
-                  <Field label="Follow-up Date and Time" value={formatFollowUp(caseData.follow_up_date)} />
+                  <Field label="Follow-up Date and Time" value={formatFollowUp(caseData.follow_up_date, caseData.follow_up_time)} />
                 </Section>
 
                 <Section title="Other Information">
                   <Field label="Group Name" value={caseData.group_name} />
                   <Field label="Residence Address" value={caseData.res_addr} />
                   <Field label="Office Address" value={caseData.off_addr} />
-                  {/* ISSUE #7 FIX: Format disbursement date to Excel-style */}
-                  <Field label="Disbursement Date" value={formatDateOnly(caseData.disb_date)} />
                   <Field label="FDD" value={formatDateOnly(caseData.fdd)} />
+                  <Field label="Disbursement Date" value={formatDateOnly(caseData.disb_date)} />
+                  <Field label="Maturity Date" value={formatDateOnly(caseData.maturity_date)} />
                 </Section>
 
                 <Section title="Data Information">

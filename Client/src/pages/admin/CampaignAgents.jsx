@@ -13,14 +13,24 @@ const CampaignAgents = () => {
   const [agents, setAgents] = useState([]);
   const [selectedCampaign, setSelectedCampaign] = useState("");
   const [assignedAgents, setAssignedAgents] = useState([]);
+  const [showCreate, setShowCreate] = useState(false);
+  const [newCampaignName, setNewCampaignName] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [message, setMessage] = useState("");
   const navigate = useNavigate();
 
+  const fetchCampaigns = async () => {
+    try {
+      const res = await axios.get("http://localhost:5000/api/campaigns", { headers });
+      setCampaigns(res.data);
+    } catch {
+      setError("Failed to load campaigns");
+    }
+  };
+
   useEffect(() => {
-    const headersLocal = { Authorization: `Bearer ${token}` };
-    axios
-      .get("http://localhost:5000/api/campaigns", { headers: headersLocal })
-      .then((res) => setCampaigns(res.data))
-      .catch(() => setError("Failed to load campaigns"));
+    fetchCampaigns();
+    // eslint-disable-next-line
   }, [token]);
 
   useEffect(() => {
@@ -81,8 +91,34 @@ const CampaignAgents = () => {
     navigate("/admin/dashboard");
   };
 
+  // Create campaign
+  const handleCreateCampaign = async () => {
+    if (!newCampaignName.trim()) {
+      setError("Campaign name required");
+      return;
+    }
+
+    try {
+      setLoading(true);
+      await axios.post(
+        "http://localhost:5000/api/campaigns",
+        { campaign_name: newCampaignName },
+        { headers }
+      );
+      setNewCampaignName("");
+      setShowCreate(false);
+      fetchCampaigns();
+      setMessage("Campaign created successfully");
+    } catch {
+      setError("Failed to create campaign");
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 p-6">
+
       <div className="mx-auto max-w-3xl rounded-2xl border bg-white p-6 shadow-xl">
         {error && (
           <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
@@ -90,13 +126,52 @@ const CampaignAgents = () => {
           </div>
         )}
 
+        {/* CREATE CAMPAIGN - moved from UploadData */}
+      <div className="mb-6">
+        {!showCreate ? (
+          <Button
+            onClick={() => setShowCreate(true)}
+            className="bg-green-200 text-black-700 hover:bg-green-300"
+          >
+            Create Campaign
+          </Button>
+        ) : (
+          <div className="flex gap-2">
+            <input
+              value={newCampaignName}
+              onChange={(e) => setNewCampaignName(e.target.value)}
+              placeholder="Campaign name"
+              className="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400/40"
+            />
+            <Button
+              onClick={handleCreateCampaign}
+              className="bg-blue-400 text-white hover:bg-blue-500 active:bg-blue-600"
+              disabled={loading}
+            >
+              {loading ? "Saving..." : "Save"}
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreate(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
+        {message && (
+          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
+            {message}
+          </div>
+        )}
+      </div>
+
         <div className="mb-6 flex items-center justify-between">
           <h2 className="text-xl font-semibold text-slate-900">
             Campaign Agent Allocation
           </h2>
 
           <Button
-            className="bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800"
+            className="bg-blue-400 text-white hover:bg-blue-500 active:bg-blue-600"
             onClick={handleSaveAndRedirect}
           >
             Save

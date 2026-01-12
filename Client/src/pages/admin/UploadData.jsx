@@ -11,8 +11,6 @@ const UploadData = () => {
   const [campaigns, setCampaigns] = useState([]);
   const [campaignId, setCampaignId] = useState("");
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [newCampaignName, setNewCampaignName] = useState("");
 
   const [editId, setEditId] = useState(null);
   const [editName, setEditName] = useState("");
@@ -37,31 +35,7 @@ const UploadData = () => {
     fetchCampaigns();
   }, []);
 
-  // Create campaign
-  const handleCreateCampaign = async () => {
-    if (!newCampaignName.trim()) {
-      setError("Campaign name required");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await axios.post(
-        "http://localhost:5000/api/campaigns",
-        { campaign_name: newCampaignName },
-        { headers }
-      );
-      setNewCampaignName("");
-      setShowCreate(false);
-      fetchCampaigns();
-      setMessage("Campaign created successfully");
-    } catch {
-      setError("Failed to create campaign");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  
   // Edit campaign
   const handleEditSave = async (id) => {
     if (!editName.trim()) {
@@ -122,38 +96,7 @@ const UploadData = () => {
           Campaign Management & Upload
         </h2>
 
-        {/* CREATE CAMPAIGN */}
-        <div className="mb-6">
-          {!showCreate ? (
-            <Button
-              onClick={() => setShowCreate(true)}
-              className="bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 shadow"
-            >
-              Create Campaign
-            </Button>
-          ) : (
-            <div className="flex gap-2">
-              <input
-                value={newCampaignName}
-                onChange={(e) => setNewCampaignName(e.target.value)}
-                placeholder="Campaign name"
-                className="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400/40"
-              />
-              <Button
-                onClick={handleCreateCampaign}
-                className="bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800"
-              >
-                Save
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setShowCreate(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-        </div>
+        
 
         {/* CAMPAIGN LIST */}
         <div className="mb-8">

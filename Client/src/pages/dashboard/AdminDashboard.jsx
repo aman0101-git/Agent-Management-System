@@ -43,7 +43,7 @@ const AdminDashboard = () => {
               hover: "hover:from-teal-600 hover:to-cyan-600",
             },
             {
-              title: "Agent Allocation",
+              title: "Create Campaign & Agent Allocation",
               desc: "Assign agents to campaigns.",
               action: "Allocate Agents",
               link: "/admin/campaign-agents",
@@ -67,7 +67,7 @@ const AdminDashboard = () => {
               hover: "hover:from-blue-600 hover:to-indigo-600",
             },
             {
-              title: "Monitoring",
+              title: "Monitoring & Analysis",
               desc: "Track agent performance and activity.",
               action: "Open Monitoring",
               link: "/admin/monitoring-analytics",
