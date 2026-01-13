@@ -1,3 +1,13 @@
+// Fetch ONCE_PTP/ONCE_PRT constraints for a customer
+export const fetchOnceConstraints = async (collDataId, token) => {
+  const res = await axios.get(
+    `http://localhost:5000/api/agent/customers/${collDataId}/once-constraints`,
+    {
+      headers: { Authorization: `Bearer ${token}` },
+    }
+  );
+  return res.data;
+};
 // src/api/agentApi.js
 import axios from "axios";
 

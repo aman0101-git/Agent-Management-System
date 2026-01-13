@@ -6,6 +6,7 @@ import {
   startCustomerVisit,
   endCustomerVisit,
   fetchCustomerVisitHistory,
+  fetchOnceConstraints,
 } from "@/api/agentApi";
 import { useAuth } from "@/context/AuthContext";
 import { DISPOSITIONS, requiresAmountAndDate, requiresAmount, requiresDateOnly, requiresPaymentDate } from "@/lib/dispositions";
@@ -111,6 +112,28 @@ const CustomerDetailDrawer = ({
   const paymentDateDispositions = ['PIF', 'SIF', 'FCL'];
   const shouldShowPaymentDate = paymentDateDispositions.includes(selectedDisposition);
 
+  const [onceConstraints, setOnceConstraints] = useState({});
+  // Fetch ONCE_PTP/ONCE_PRT constraints when drawer opens
+  useEffect(() => {
+    const loadOnceConstraints = async () => {
+      if (isOpen && caseData && caseData.id) {
+        try {
+          const res = await fetchOnceConstraints(caseData.id, token);
+          const map = {};
+          (res.constraints || []).forEach((c) => {
+            map[c.constraint_type] = c.triggered_at;
+          });
+          setOnceConstraints(map);
+        } catch (err) {
+          setOnceConstraints({});
+        }
+      } else {
+        setOnceConstraints({});
+      }
+    };
+    loadOnceConstraints();
+  }, [isOpen, caseData, token]);
+  
   useEffect(() => {
     if (isOpen && caseId) {
       loadCaseDetails();
@@ -514,18 +537,39 @@ const CustomerDetailDrawer = ({
                         <label className="block text-xs font-medium text-slate-700 mb-1">Select Disposition</label>
                         <select
                           value={selectedDisposition}
-                          onChange={(e) =>
-                            setSelectedDisposition(e.target.value)
-                          }
+                          onChange={(e) => setSelectedDisposition(e.target.value)}
                           className="w-full border rounded px-3 py-2"
                         >
                           <option value="">Select Disposition</option>
-                          {Object.values(DISPOSITIONS).map((d) => (
-                            <option key={d.code} value={d.code}>
-                              {d.code} - {d.name}
-                            </option>
-                          ))}
+                          {Object.values(DISPOSITIONS).map((d) => {
+                            let disabled = false;
+                            let tooltip = "";
+                            if (d.code === "PTP" && onceConstraints["ONCE_PTP"]) {
+                              disabled = true;
+                              tooltip = `PTP already used on ${new Date(onceConstraints["ONCE_PTP"]).toLocaleString()}`;
+                            }
+                            if (d.code === "PRT" && onceConstraints["ONCE_PRT"]) {
+                              disabled = true;
+                              tooltip = `PRT already used on ${new Date(onceConstraints["ONCE_PRT"]).toLocaleString()}`;
+                            }
+                            return (
+                              <option key={d.code} value={d.code} disabled={disabled} title={tooltip}>
+                                {d.code} - {d.name}
+                              </option>
+                            );
+                          })}
                         </select>
+                        {/* Show tooltip if PTP/PRT is disabled */}
+                        {(onceConstraints["ONCE_PTP"] || onceConstraints["ONCE_PRT"]) && (
+                          <div className="text-xs text-rose-600 mt-1">
+                            {onceConstraints["ONCE_PTP"] && (
+                              <span>PTP disabled (used on {new Date(onceConstraints["ONCE_PTP"]).toLocaleString()})<br/></span>
+                            )}
+                            {onceConstraints["ONCE_PRT"] && (
+                              <span>PRT disabled (used on {new Date(onceConstraints["ONCE_PRT"]).toLocaleString()})</span>
+                            )}
+                          </div>
+                        )}
                         
                         <label className="block text-xs font-medium text-slate-700 mb-1">Remarks</label>
                         <textarea

@@ -1,6 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/auth/Login';
 import AdminDashboard from "./pages/dashboard/AdminDashboard";
+import FileExports from "./pages/dashboard/FileExports";
 import AgentDashboard from "./pages/dashboard/AgentDashboard";
 import CustomerSearch from "./pages/dashboard/CustomerSearch";
 import PerformanceAnalytics from "./pages/dashboard/PerformanceAnalytics";
@@ -89,6 +90,14 @@ function App() {
         }
       />
 
+      <Route
+        path="/admin/file-exports"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <FileExports />
+          </ProtectedRoute>
+        }
+      />
       <Route
         path="/admin/monitoring-analytics"
         element={

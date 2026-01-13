@@ -1,6 +1,7 @@
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import FileExports from "./FileExports";
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -73,6 +74,14 @@ const AdminDashboard = () => {
               link: "/admin/monitoring-analytics",
               base: "from-amber-500 to-orange-500",
               hover: "hover:from-amber-600 hover:to-orange-600",
+            },
+            {
+              title: "File Exports",
+              desc: "Export MySQL data to Excel files.",
+              action: "Go to File Exports",
+              link: "/admin/file-exports",
+              base: "from-pink-500 to-rose-500",
+              hover: "hover:from-pink-600 hover:to-rose-600",
             },
           ].map((item) => (
             <div
