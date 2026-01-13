@@ -1,3 +1,16 @@
+// GET /api/customers/:collDataId/once-constraints
+export const getOnceConstraints = async (req, res) => {
+  const { collDataId } = req.params;
+  try {
+    const [rows] = await pool.query(
+      `SELECT constraint_type, triggered_at FROM customer_once_constraints WHERE coll_data_id = ? AND is_active = 1`,
+      [collDataId]
+    );
+    res.json({ constraints: rows });
+  } catch (err) {
+    res.status(500).json({ message: 'Failed to fetch once constraints', error: err.message });
+  }
+};
 import pool from '../config/mysql.js';
 import {
   DISPOSITION_RULES,
@@ -368,26 +381,46 @@ export const submitDisposition = async (req, res) => {
 
     await conn.beginTransaction();
 
+
     // ==========================================
-    // 1️⃣ LOCK LATEST AGENT_CASE
+    // 1️⃣ LOCK LATEST AGENT_CASE & RESOLVE coll_data_id
     // ==========================================
-    
     const [[agentCase]] = await conn.query(
-      `
-      SELECT id, status
-      FROM agent_cases
-      WHERE coll_data_id = ?
-        AND agent_id = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-      FOR UPDATE
-      `,
+      `SELECT id, status, coll_data_id FROM agent_cases WHERE coll_data_id = ? AND agent_id = ? ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
       [caseId, agentId]
     );
-
     if (!agentCase) {
       await conn.rollback();
       return res.status(404).json({ message: "Agent case not found" });
+    }
+    const collDataId = agentCase.coll_data_id;
+
+    // ==========================================
+    // 1.5️⃣ ENFORCE ONCE_PTP/ONCE_PRT CONSTRAINTS
+    // ==========================================
+    // Helper: check if disposition or ptp_target implies PTP/PRT
+    const impliesPTP = disposition === 'PTP' || (ptpTarget && String(ptpTarget).trim() !== '');
+    const impliesPRT = disposition === 'PRT';
+
+    if (impliesPTP) {
+      const [[row]] = await conn.query(
+        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = 'ONCE_PTP' AND is_active = 1`,
+        [collDataId]
+      );
+      if (row) {
+        await conn.rollback();
+        return res.status(400).json({ message: 'ONCE_PTP constraint already used for this customer.' });
+      }
+    }
+    if (impliesPRT) {
+      const [[row]] = await conn.query(
+        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = 'ONCE_PRT' AND is_active = 1`,
+        [collDataId]
+      );
+      if (row) {
+        await conn.rollback();
+        return res.status(400).json({ message: 'ONCE_PRT constraint already used for this customer.' });
+      }
     }
 
     // ==========================================
@@ -451,7 +484,7 @@ export const submitDisposition = async (req, res) => {
     // ==========================================
     // 4️⃣ PROCESS DISPOSITION DATA
     // ==========================================
-    await conn.query(
+    const [result] = await conn.query(
       `
       INSERT INTO agent_dispositions
       (
@@ -480,6 +513,25 @@ export const submitDisposition = async (req, res) => {
         safePaymentDate,
       ]
     );
+    const insertedDispositionId = result.insertId;
+
+    // Insert ONCE_PTP/ONCE_PRT constraint if needed
+    if (impliesPTP) {
+      await conn.query(
+        `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active)
+         VALUES (?, 'ONCE_PTP', ?, NOW(), 1)
+         ON DUPLICATE KEY UPDATE is_active = 1, triggered_disposition_id = VALUES(triggered_disposition_id), triggered_at = VALUES(triggered_at)`,
+        [collDataId, insertedDispositionId]
+      );
+    }
+    if (impliesPRT) {
+      await conn.query(
+        `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active)
+         VALUES (?, 'ONCE_PRT', ?, NOW(), 1)
+         ON DUPLICATE KEY UPDATE is_active = 1, triggered_disposition_id = VALUES(triggered_disposition_id), triggered_at = VALUES(triggered_at)`,
+        [collDataId, insertedDispositionId]
+      );
+    }
 
     // ==========================================
     // 5️⃣ UPDATE AGENT_CASE

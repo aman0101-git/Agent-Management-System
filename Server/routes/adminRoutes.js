@@ -2,13 +2,16 @@
 
 import express from 'express';
 import { protect, allowRoles } from '../middlewares/authMiddleware.js';
+
 import {
   assignAgentTarget,
   getAgentTargets,
   getAllAgentTargets,
   updateAgentTarget,
   deleteAgentTarget,
+  exportAdminData,
 } from '../controllers/adminController.js';
+
 import {
   getMonitoringAnalytics,
   getMonitoringAgents,
@@ -16,6 +19,16 @@ import {
 } from '../controllers/adminMonitoringController.js';
 
 const router = express.Router();
+
+/**
+ * Export MySQL data to Excel (admin only)
+ */
+router.get(
+  '/exports',
+  protect,
+  allowRoles('ADMIN'),
+  exportAdminData
+);
 
 /**
  * Assign/Create monthly target for an agent

@@ -2,6 +2,7 @@
 
 import express from 'express';
 import { protect, allowRoles } from '../middlewares/authMiddleware.js';
+
 import {
   getAgentCases,
   getAgentCaseById,
@@ -11,7 +12,9 @@ import {
   getAgentAnalytics,
   getAgentTarget,
   setAgentTarget,
+  getOnceConstraints,
 } from '../controllers/agentController.js';
+
 import {
   startCustomerVisit,
   endCustomerVisit,
@@ -19,6 +22,15 @@ import {
 } from '../controllers/agentCustomerVisitController.js';
 
 const router = express.Router();
+
+/**
+ * Get ONCE_PTP/ONCE_PRT constraints for a customer
+ */
+router.get(
+  '/customers/:collDataId/once-constraints',
+  protect,
+  getOnceConstraints
+);
 
 /**
  * Fetch agent dashboard list
