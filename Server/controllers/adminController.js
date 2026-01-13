@@ -4,196 +4,43 @@ import pool from '../config/mysql.js';
 // GET /api/admin/exports?type=ONCE_PTP|ONCE_PRT|AGENT_DISPOSITIONS|AGENT_CASES&from=YYYY-MM-DD&to=YYYY-MM-DD
 export const exportAdminData = async (req, res) => {
   try {
-    const { type, from, to } = req.query;
-
-    const ALLOWED_TYPES = [
-      'ONCE_PTP',
-      'ONCE_PRT',
-      'AGENT_DISPOSITIONS',
-      'AGENT_CASES'
-    ];
-
-    if (!ALLOWED_TYPES.includes(type)) {
-      return res.status(400).json({ message: 'Invalid export type' });
+    // 🔐 Auth guard
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(401).json({ message: "Unauthorized" });
     }
 
-    let sql = '';
-    let params = [];
-    let rows = [];
-    let headers = [];
+    const { type } = req.query;
 
-    /* ===============================
-       BUILD QUERY PER EXPORT TYPE
-       =============================== */
-
-    if (type === 'ONCE_PTP' || type === 'ONCE_PRT') {
-      sql = `
-        SELECT
-          c.id AS constraint_id,
-          c.coll_data_id,
-          c.constraint_type,
-          c.triggered_at,
-          d.disposition,
-          d.promise_amount,
-          d.ptp_target,
-          d.created_at AS disposition_created_at
-        FROM customer_once_constraints c
-        JOIN agent_dispositions d
-          ON d.id = c.triggered_disposition_id
-        WHERE c.constraint_type = ?
-      `;
-      params.push(type);
-
-      if (from && to) {
-        sql += ' AND c.triggered_at BETWEEN ? AND ?';
-        params.push(from, to);
-      } else if (from) {
-        sql += ' AND c.triggered_at >= ?';
-        params.push(from);
-      } else if (to) {
-        sql += ' AND c.triggered_at <= ?';
-        params.push(to);
-      }
-
-      sql += ' ORDER BY c.triggered_at DESC';
-
-      headers = [
-        'constraint_id',
-        'coll_data_id',
-        'constraint_type',
-        'triggered_at',
-        'disposition',
-        'promise_amount',
-        'ptp_target',
-        'disposition_created_at',
-      ];
+    if (!["ONCE_PTP", "ONCE_PRT"].includes(type)) {
+      return res.status(400).json({ message: "Invalid export type" });
     }
 
-    else if (type === 'AGENT_DISPOSITIONS') {
-      sql = `
-        SELECT
-          id,
-          agent_id,
-          agent_case_id,
-          disposition,
-          promise_amount,
-          ptp_target,
-          follow_up_date,
-          created_at
-        FROM agent_dispositions
-        WHERE 1=1
-      `;
-
-      if (from && to) {
-        sql += ' AND created_at BETWEEN ? AND ?';
-        params.push(from, to);
-      } else if (from) {
-        sql += ' AND created_at >= ?';
-        params.push(from);
-      } else if (to) {
-        sql += ' AND created_at <= ?';
-        params.push(to);
-      }
-
-      sql += ' ORDER BY created_at DESC';
-
-      headers = [
-        'id',
-        'agent_id',
-        'agent_case_id',
-        'disposition',
-        'promise_amount',
-        'ptp_target',
-        'follow_up_date',
-        'created_at',
-      ];
-    }
-
-    else if (type === 'AGENT_CASES') {
-      sql = `
-        SELECT
-          id,
-          agent_id,
-          coll_data_id,
-          status,
-          allocation_date,
-          created_at
-        FROM agent_cases
-        WHERE 1=1
-      `;
-
-      if (from && to) {
-        sql += ' AND created_at BETWEEN ? AND ?';
-        params.push(from, to);
-      } else if (from) {
-        sql += ' AND created_at >= ?';
-        params.push(from);
-      } else if (to) {
-        sql += ' AND created_at <= ?';
-        params.push(to);
-      }
-
-      sql += ' ORDER BY created_at DESC';
-
-      headers = [
-        'id',
-        'agent_id',
-        'coll_data_id',
-        'status',
-        'allocation_date',
-        'created_at',
-      ];
-    }
-
-    /* ===============================
-       FETCH DATA
-       =============================== */
-    const [result] = await pool.query(sql, params);
-    rows = result || [];
-
-    /* ===============================
-       BUILD CSV (SAFE & SIMPLE)
-       =============================== */
-
-    let csv = '';
-
-    // Header row
-    csv += headers.join(',') + '\n';
-
-    // Data rows
-    for (const row of rows) {
-      const line = headers.map(h => {
-        let val = row[h];
-
-        if (val === null || val === undefined) return '';
-        if (val instanceof Date) return `"${val.toISOString()}"`;
-
-        // Escape quotes
-        return `"${String(val).replace(/"/g, '""')}"`;
-      }).join(',');
-
-      csv += line + '\n';
-    }
-
-    /* ===============================
-       SEND CSV
-       =============================== */
-
-    const fileName = `export_${type}_${new Date().toISOString().slice(0,10)}.csv`;
-
-    res.status(200);
-    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader(
-      'Content-Disposition',
-      `attachment; filename="${fileName}"`
+    const [rows] = await pool.query(
+      `SELECT coll_data_id, constraint_type, triggered_at
+       FROM customer_once_constraints
+       WHERE constraint_type = ?
+       ORDER BY triggered_at DESC`,
+      [type]
     );
 
-    res.send(csv);
-    return;
+    // Build CSV
+    let csv = "coll_data_id,constraint_type,triggered_at\n";
 
-  } catch (error) {
-    console.error('CSV EXPORT FAILED:', error);
-    res.status(500).json({ message: 'Export failed' });
+    rows.forEach(r => {
+      csv += `${r.coll_data_id},${r.constraint_type},${r.triggered_at}\n`;
+    });
+
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="${type}.csv"`
+    );
+
+    res.status(200).send(csv);
+
+  } catch (err) {
+    console.error("EXPORT ERROR:", err);
+    res.status(500).json({ message: "Export failed" });
   }
 };
 
@@ -207,7 +54,7 @@ export const assignAgentTarget = async (req, res) => {
     const { agentId, month, targetAmount } = req.body;
 
     // Validate inputs
-    if (!agentId || !month || !targetAmount) {
+    if (!agentId || !month || targetAmount === undefined) {
       return res.status(400).json({ 
         message: "agentId, month (YYYY-MM), and targetAmount required" 
       });
@@ -223,7 +70,7 @@ export const assignAgentTarget = async (req, res) => {
     // Validate target amount
     if (typeof targetAmount !== 'number' || targetAmount < 0) {
       return res.status(400).json({ 
-        message: "targetAmount must be a positive number" 
+        message: "targetAmount must be a non-negative number" 
       });
     }
 
@@ -373,9 +220,9 @@ export const updateAgentTarget = async (req, res) => {
     const { id } = req.params;
     const { targetAmount } = req.body;
 
-    if (!targetAmount || typeof targetAmount !== 'number' || targetAmount < 0) {
+    if (targetAmount === undefined || typeof targetAmount !== 'number' || targetAmount < 0) {
       return res.status(400).json({ 
-        message: "targetAmount must be a positive number" 
+        message: "targetAmount must be a non-negative number" 
       });
     }
 
