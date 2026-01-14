@@ -63,7 +63,6 @@ const formatFollowUp = (date, time) => {
   return `${formattedDate} at ${formattedTime}`;
 };
 
-// ISSUE #7 FIX: Format dates to Excel-style (DD/MM/YYYY)
 const formatDateOnly = (dateStr) => {
   if (!dateStr) return "-";
   
@@ -212,7 +211,10 @@ const CustomerDetailDrawer = ({
       return;
     }
 
-    if (requiresAmountAndDate(selectedDisposition)) {
+    if (
+      requiresAmountAndDate(selectedDisposition) ||
+      selectedDisposition === "PRT"
+    ) {
       if (!followUpDate) {
         alert("Follow-up date is required for this disposition");
         return;
@@ -290,15 +292,27 @@ const CustomerDetailDrawer = ({
     }
   };
 
-  const handleEditDisposition = (disposition) => {
-    setSelectedDisposition(disposition.disposition);
-    setPromiseAmount(disposition.promise_amount || "");
-    setFollowUpDate(disposition.follow_up_date ? disposition.follow_up_date.split('T')[0] : "");
-    setFollowUpTime(disposition.follow_up_time || "");
-    setRemarks(disposition.remarks || "");
-    setIsEditing(true);
-    setEditingAgentCaseId(disposition.agent_case_id);
-  };
+  const handleEditDisposition = (d) => {
+  setIsEditing(true);
+  setEditingAgentCaseId(d.agent_case_id || null);
+
+  setSelectedDisposition(d.disposition || "");
+  setRemarks(d.remarks || "");
+  setPromiseAmount(d.promise_amount || "");
+
+  setFollowUpDate(
+    d.follow_up_date ? d.follow_up_date.split("T")[0] : ""
+  );
+  setFollowUpTime(d.follow_up_time || "");
+
+  setPtpTarget(d.ptp_target || "");
+
+  setPaymentDate(
+    d.payment_date ? d.payment_date.split("T")[0] : ""
+  );
+  setPaymentTime(d.payment_time || "");
+};
+
 
   // Handle drawer close: end visit if active, then call parent onClose
   const handleInternalClose = async () => {
@@ -496,7 +510,6 @@ const CustomerDetailDrawer = ({
                                     </p>
                                   )}
 
-                                  {/* ISSUE #8 FIX: Display PTP target in edit history */}
                                   {d.ptp_target && (
                                     <p>
                                       <span className="font-medium">PTP Target:</span>{" "}
@@ -541,35 +554,13 @@ const CustomerDetailDrawer = ({
                           className="w-full border rounded px-3 py-2"
                         >
                           <option value="">Select Disposition</option>
-                          {Object.values(DISPOSITIONS).map((d) => {
-                            let disabled = false;
-                            let tooltip = "";
-                            if (d.code === "PTP" && onceConstraints["ONCE_PTP"]) {
-                              disabled = true;
-                              tooltip = `PTP already used on ${new Date(onceConstraints["ONCE_PTP"]).toLocaleString()}`;
-                            }
-                            if (d.code === "PRT" && onceConstraints["ONCE_PRT"]) {
-                              disabled = true;
-                              tooltip = `PRT already used on ${new Date(onceConstraints["ONCE_PRT"]).toLocaleString()}`;
-                            }
-                            return (
-                              <option key={d.code} value={d.code} disabled={disabled} title={tooltip}>
-                                {d.code} - {d.name}
-                              </option>
-                            );
-                          })}
+                          {Object.values(DISPOSITIONS).map((d) => (
+                            <option key={d.code} value={d.code}>
+                              {d.code} - {d.name}
+                            </option>
+                          ))}
                         </select>
-                        {/* Show tooltip if PTP/PRT is disabled */}
-                        {(onceConstraints["ONCE_PTP"] || onceConstraints["ONCE_PRT"]) && (
-                          <div className="text-xs text-rose-600 mt-1">
-                            {onceConstraints["ONCE_PTP"] && (
-                              <span>PTP disabled (used on {new Date(onceConstraints["ONCE_PTP"]).toLocaleString()})<br/></span>
-                            )}
-                            {onceConstraints["ONCE_PRT"] && (
-                              <span>PRT disabled (used on {new Date(onceConstraints["ONCE_PRT"]).toLocaleString()})</span>
-                            )}
-                          </div>
-                        )}
+                        {/* ...existing code... */}
                         
                         <label className="block text-xs font-medium text-slate-700 mb-1">Remarks</label>
                         <textarea
@@ -601,7 +592,7 @@ const CustomerDetailDrawer = ({
                         )}
 
                         {/* Show follow-up date/time for all that require it (including PRT) */}
-                        {requiresAmountAndDate(selectedDisposition) && (
+                        {(requiresAmountAndDate(selectedDisposition) || selectedDisposition === "PRT") && (
                           <div>
                             <label className="block text-xs font-medium text-slate-700 mb-1">Follow up Date and Time</label>
                             <div className="flex gap-3">

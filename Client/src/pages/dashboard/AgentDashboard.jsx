@@ -6,6 +6,7 @@ import { fetchAgentCases, fetchNextCase } from "@/api/agentApi";
 import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
 
 const AgentDashboard = () => {
+    const [fetchingNext, setFetchingNext] = useState(false);
   const { user, token, logout } = useAuth();
 
   const [cases, setCases] = useState([]);
@@ -204,13 +205,44 @@ const AgentDashboard = () => {
 
       {/* Main */}
       <main className="mx-auto max-w-7xl px-6 py-8">
-        <input
-          type="text"
-          placeholder="Search by name, phone, or loan ID"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="mb-6 w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
-        />
+
+        <div className="flex items-center justify-between mb-6">
+          <input
+            type="text"
+            placeholder="Search by name, phone, or loan ID"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+          />
+          <button
+            className="ml-4 px-2 py-1 rounded bg-indigo-600 text-white font-medium shadow hover:bg-indigo-700 transition disabled:opacity-60 text-xs"
+            style={{ minWidth: 70 }}
+            disabled={fetchingNext}
+            onClick={async () => {
+              setFetchingNext(true);
+              try {
+                const nextRes = await fetchNextCase(token);
+                if (nextRes.status === 200 && nextRes.data?.caseId) {
+                  if (typeof window.__reloadAgentCases === "function") {
+                    await window.__reloadAgentCases();
+                  }
+                  setSelectedCaseId(nextRes.data.caseId);
+                  setDrawerOpen(true);
+                } else if (nextRes.status === 204) {
+                  alert("No new customers available.");
+                } else {
+                  alert("Could not fetch next customer.");
+                }
+              } catch (e) {
+                alert("Error fetching next customer.");
+              } finally {
+                setFetchingNext(false);
+              }
+            }}
+          >
+            {fetchingNext ? "Loading..." : "New Customer"}
+          </button>
+        </div>
 
         {!loading && sortedCases.length > 0 && (
           <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
@@ -288,9 +320,23 @@ const AgentDashboard = () => {
           setDrawerOpen(false);
           setSelectedCaseId(null);
         }}
-        onDispositionSubmitted={() => {
+        onDispositionSubmitted={async (res) => {
           if (typeof window.__reloadAgentCases === "function") {
-            window.__reloadAgentCases();
+            await window.__reloadAgentCases();
+          }
+          // If status changed and next customer should be allocated, open next customer automatically
+          if (res && (res.allocateNext || res.allocateNextOnStatusChange)) {
+            try {
+              const nextRes = await fetchNextCase(token);
+              if (nextRes.status === 200 && nextRes.data?.caseId) {
+                if (typeof window.__reloadAgentCases === "function") {
+                  await window.__reloadAgentCases();
+                }
+                setSelectedCaseId(nextRes.data.caseId);
+                setDrawerOpen(true);
+                return;
+              }
+            } catch {}
           }
           setDrawerOpen(false);
           setSelectedCaseId(null);
