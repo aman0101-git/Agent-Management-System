@@ -39,8 +39,8 @@ export const DISPOSITION_RULES = {
     resultStatus: 'FOLLOW_UP',
     requires: {
       amount: true,
-      followUpDate: false,
-      followUpTime: false,
+      followUpDate: true,
+      followUpTime: true,
       paymentDate: true,
       paymentTime: true,
     },

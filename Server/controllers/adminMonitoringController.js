@@ -196,17 +196,17 @@ export const getMonitoringAnalytics = async (req, res) => {
       // Support multi-select: sum target_amount for all selected campaigns
       const campaignIds = campaign_id.split(",").map((id) => id.trim());
       const placeholders = campaignIds.map(() => "?").join(",");
-      const [[row]] = await pool.query(
-        `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE id IN (${placeholders})`,
-        campaignIds
-      );
-      targetAmount = row?.target_amount || 0;
+        const [[row]] = await pool.query(
+          `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE id IN (${placeholders}) AND status = 'ACTIVE'`,
+          campaignIds
+        );
+        targetAmount = row?.target_amount || 0;
     } else {
       // If ALL, sum all campaign targets
-      const [[row]] = await pool.query(
-        `SELECT SUM(target_amount) AS target_amount FROM campaigns`
-      );
-      targetAmount = row?.target_amount || 0;
+        const [[row]] = await pool.query(
+          `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE status = 'ACTIVE'`
+        );
+        targetAmount = row?.target_amount || 0;
     }
 
     const achievementPercent =

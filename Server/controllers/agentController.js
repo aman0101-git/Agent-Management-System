@@ -310,164 +310,95 @@ export const submitDisposition = async (req, res) => {
     // ==========================================
     // INPUT VALIDATION
     // ==========================================
-    
     if (!disposition) {
       return res.status(400).json({ message: "Disposition required" });
     }
 
-    // Validate disposition exists
     if (!DISPOSITION_RULES[disposition]) {
       return res.status(400).json({
         message: `Unknown disposition: ${disposition}`,
       });
     }
 
-      // Rule-driven validation (strict)
-      const rule = DISPOSITION_RULES[disposition];
-      const errors = [];
+    const rule = DISPOSITION_RULES[disposition];
+    const errors = [];
 
-      // Validate required fields strictly (no 0, empty, null)
-      if (rule.requires.amount && (!promiseAmount || isNaN(promiseAmount) || Number(promiseAmount) <= 0)) {
-        errors.push(`Amount is required for ${rule.code}`);
-      }
-      if (rule.requires.followUpDate && (!followUpDate || followUpDate === '' || followUpDate === '0')) {
-        errors.push(`Follow-up date is required for ${rule.code}`);
-      }
-      if (rule.requires.followUpTime && (!followUpTime || followUpTime === '' || followUpTime === '0')) {
-        errors.push(`Follow-up time is required for ${rule.code}`);
-      }
-      if (disposition === 'PTP' && (!ptpTarget || ptpTarget === '' || ptpTarget === '0')) {
-        errors.push('PTP target is required for PTP disposition');
-      }
+    if (rule.requires.amount && (!promiseAmount || Number(promiseAmount) <= 0)) {
+      errors.push(`Amount is required for ${rule.code}`);
+    }
+    if (rule.requires.followUpDate && !followUpDate) {
+      errors.push(`Follow-up date is required for ${rule.code}`);
+    }
+    if (rule.requires.followUpTime && !followUpTime) {
+      errors.push(`Follow-up time is required for ${rule.code}`);
+    }
+    if (disposition === "PTP" && !ptpTarget) {
+      errors.push("PTP target is required");
+    }
 
+    const safePromiseAmount = rule.requires.amount ? promiseAmount : null;
+    const safeFollowUpDate = rule.requires.followUpDate ? followUpDate : null;
+    const safeFollowUpTime = rule.requires.followUpTime ? followUpTime : null;
+    const safePtpTarget = disposition === "PTP" ? ptpTarget : null;
 
-      // For non-required fields, ignore them (set to null)
-      const safePromiseAmount = rule.requires.amount ? promiseAmount : null;
-      const safeFollowUpDate = rule.requires.followUpDate ? followUpDate : null;
-      const safeFollowUpTime = rule.requires.followUpTime ? followUpTime : null;
-      const safePtpTarget = disposition === 'PTP' ? ptpTarget : null;
-      // Only allow paymentDate for PIF, SIF, FCL, PRT
-      const paymentDateDispositions = ['PIF', 'SIF', 'FCL', 'PRT'];
-      const safePaymentDate = paymentDateDispositions.includes(disposition) ? paymentDate || null : null;
+    const paymentDateDispositions = ["PIF", "SIF", "FCL", "PRT"];
+    const safePaymentDate = paymentDateDispositions.includes(disposition)
+      ? paymentDate || null
+      : null;
 
-      // Validate paymentDate for these dispositions
-      if (paymentDateDispositions.includes(disposition) && (!safePaymentDate || safePaymentDate === '')) {
-        errors.push('Payment date is required for ' + disposition);
-      }
+    if (paymentDateDispositions.includes(disposition) && !safePaymentDate) {
+      errors.push(`Payment date is required for ${disposition}`);
+    }
 
-      // For dispositions that don't require amount, reject if sent
-      if (!rule.requires.amount && promiseAmount) {
-        errors.push(`${rule.code} should not have an amount`);
-      }
-      // For CBC, reject amount if sent
-      if (disposition === 'CBC' && promiseAmount) {
-        errors.push('CBC should not have an amount');
-      }
-
-      // Validate time format if provided
-      if (safeFollowUpTime) {
-        const timeValidation = validateTimeFormat(safeFollowUpTime);
-        if (!timeValidation.valid) {
-          errors.push(timeValidation.error);
-        }
-      }
-
-      if (errors.length > 0) {
-        return res.status(400).json({
-          message: 'Validation failed',
-          errors,
-        });
-      }
+    if (errors.length > 0) {
+      return res.status(400).json({ message: "Validation failed", errors });
+    }
 
     await conn.beginTransaction();
 
-
     // ==========================================
-    // 1️⃣ LOCK LATEST AGENT_CASE & RESOLVE coll_data_id
+    // LOCK AGENT CASE
     // ==========================================
     const [[agentCase]] = await conn.query(
-      `SELECT id, status, coll_data_id FROM agent_cases WHERE coll_data_id = ? AND agent_id = ? ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      `SELECT id, status, coll_data_id
+       FROM agent_cases
+       WHERE coll_data_id = ? AND agent_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1
+       FOR UPDATE`,
       [caseId, agentId]
     );
+
     if (!agentCase) {
       await conn.rollback();
       return res.status(404).json({ message: "Agent case not found" });
     }
+
     const collDataId = agentCase.coll_data_id;
 
-    // ==========================================
-    // 1.5️⃣ ENFORCE ONCE_PTP/ONCE_PRT CONSTRAINTS
-    // ==========================================
-    // Helper: check if disposition or ptp_target implies PTP/PRT
-    const impliesPTP = disposition === 'PTP' || (ptpTarget && String(ptpTarget).trim() !== '');
-    const impliesPRT = disposition === 'PRT';
-
-    if (impliesPTP) {
-      const [[row]] = await conn.query(
-        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = 'ONCE_PTP' AND is_active = 1`,
-        [collDataId]
-      );
-      if (row) {
-        await conn.rollback();
-        return res.status(400).json({ message: 'ONCE_PTP constraint already used for this customer.' });
-      }
-    }
-    if (impliesPRT) {
-      const [[row]] = await conn.query(
-        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = 'ONCE_PRT' AND is_active = 1`,
-        [collDataId]
-      );
-      if (row) {
-        await conn.rollback();
-        return res.status(400).json({ message: 'ONCE_PRT constraint already used for this customer.' });
-      }
-    }
+    // ONCE_PTP/ONCE_PRT constraint checks removed: allow multiple PTP/PRT submissions
 
     // ==========================================
-    // 2️⃣ DETERMINE NEW STATUS FROM RULES
+    // SAVE EDIT HISTORY
     // ==========================================
-    
-    const newStatus = getResultStatus(disposition);
-    const statusChanged = newStatus !== agentCase.status;
-
-    // ==========================================
-    // 3️⃣ SAVE EDIT HISTORY (IF EDIT)
-    // ==========================================
-    
     if (isEdit) {
       const [[latest]] = await conn.query(
-        `
-        SELECT
-          disposition,
-          remarks,
-          promise_amount,
-          follow_up_date,
-          follow_up_time,
-          ptp_target
-        FROM agent_dispositions
-        WHERE agent_case_id = ?
-        ORDER BY created_at DESC
-        LIMIT 1
-        FOR UPDATE
-        `,
+        `SELECT disposition, remarks, promise_amount,
+                follow_up_date, follow_up_time, ptp_target
+         FROM agent_dispositions
+         WHERE agent_case_id = ?
+         ORDER BY created_at DESC
+         LIMIT 1
+         FOR UPDATE`,
         [agentCase.id]
       );
 
       if (latest) {
         await conn.query(
-          `
-          INSERT INTO agent_dispositions_edit_history
-          (
-            agent_case_id,
-            disposition,
-            remarks,
-            promise_amount,
-            follow_up_date,
-            follow_up_time,
-            ptp_target
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?)
-          `,
+          `INSERT INTO agent_dispositions_edit_history
+           (agent_case_id, disposition, remarks, promise_amount,
+            follow_up_date, follow_up_time, ptp_target)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
           [
             agentCase.id,
             latest.disposition,
@@ -482,25 +413,14 @@ export const submitDisposition = async (req, res) => {
     }
 
     // ==========================================
-    // 4️⃣ PROCESS DISPOSITION DATA
+    // INSERT DISPOSITION
     // ==========================================
     const [result] = await conn.query(
-      `
-      INSERT INTO agent_dispositions
-      (
-        agent_case_id,
-        agent_id,
-        disposition,
-        ptp_target,
-        remarks,
-        promise_amount,
-        follow_up_date,
-        follow_up_time,
-        payment_date,
-        created_at
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-      `,
+      `INSERT INTO agent_dispositions
+       (agent_case_id, agent_id, disposition, ptp_target,
+        remarks, promise_amount, follow_up_date,
+        follow_up_time, payment_date, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
       [
         agentCase.id,
         agentId,
@@ -513,49 +433,43 @@ export const submitDisposition = async (req, res) => {
         safePaymentDate,
       ]
     );
+
     const insertedDispositionId = result.insertId;
-
-    // Insert ONCE_PTP/ONCE_PRT constraint if needed
-    if (impliesPTP) {
-      await conn.query(
-        `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active)
-         VALUES (?, 'ONCE_PTP', ?, NOW(), 1)
-         ON DUPLICATE KEY UPDATE is_active = 1, triggered_disposition_id = VALUES(triggered_disposition_id), triggered_at = VALUES(triggered_at)`,
-        [collDataId, insertedDispositionId]
-      );
-    }
-    if (impliesPRT) {
-      await conn.query(
-        `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active)
-         VALUES (?, 'ONCE_PRT', ?, NOW(), 1)
-         ON DUPLICATE KEY UPDATE is_active = 1, triggered_disposition_id = VALUES(triggered_disposition_id), triggered_at = VALUES(triggered_at)`,
-        [collDataId, insertedDispositionId]
-      );
-    }
+    // ONCE_PTP/ONCE_PRT constraint logic removed: allow multiple PTP/PRT submissions
 
     // ==========================================
-    // 5️⃣ UPDATE AGENT_CASE
+    // ALWAYS UPDATE AGENT_CASE (FIXED)
     // ==========================================
-    
-    if (statusChanged) {
+    const newStatus = getResultStatus(disposition);
+    const statusChanged = newStatus !== agentCase.status;
+
+    await conn.query(
+      `UPDATE agent_cases
+       SET
+         status = ?,
+         is_active = 0,
+         first_call_at = COALESCE(first_call_at, NOW()),
+         last_call_at = NOW(),
+         follow_up_date = ?,
+         follow_up_time = ?
+       WHERE id = ?`,
+      [
+        newStatus,
+        safeFollowUpDate,
+        safeFollowUpTime,
+        agentCase.id,
+      ]
+    );
+
+    // ==========================================
+    // RELEASE ONCE CONSTRAINTS WHEN DONE
+    // ==========================================
+    if (statusChanged && newStatus === "DONE") {
       await conn.query(
-        `
-        UPDATE agent_cases
-        SET
-          status = ?,
-          is_active = 0,
-          first_call_at = COALESCE(first_call_at, NOW()),
-          last_call_at = NOW(),
-          follow_up_date = ?,
-          follow_up_time = ?
-        WHERE id = ?
-        `,
-        [
-          newStatus,
-          safeFollowUpDate,
-          safeFollowUpTime,
-          agentCase.id,
-        ]
+        `UPDATE customer_once_constraints
+         SET is_active = 0
+         WHERE coll_data_id = ? AND is_active = 1`,
+        [collDataId]
       );
     }
 
@@ -564,8 +478,7 @@ export const submitDisposition = async (req, res) => {
     return res.json({
       message: "Disposition saved successfully",
       status: newStatus,
-      allocateNext: statusChanged && newStatus === 'DONE',
-      allocateNextOnStatusChange: statusChanged,
+      allocateNext: statusChanged,
     });
 
   } catch (err) {
@@ -579,6 +492,7 @@ export const submitDisposition = async (req, res) => {
     conn.release();
   }
 };
+
 
 /**
  * GET /api/agent/cases/next
