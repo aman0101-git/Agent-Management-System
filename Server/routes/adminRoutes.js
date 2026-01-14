@@ -18,6 +18,8 @@ import {
   getMonitoringCampaigns,
 } from '../controllers/adminMonitoringController.js';
 
+import { exportSingleTable } from "../controllers/adminController.js";
+
 const router = express.Router();
 
 /**
@@ -28,6 +30,13 @@ router.get(
   protect,
   allowRoles('ADMIN'),
   exportAdminData
+);
+
+router.get(
+  "/exports/table",
+  protect,
+  allowRoles("ADMIN"),
+  exportSingleTable
 );
 
 /**

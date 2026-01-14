@@ -1,45 +1,236 @@
-// GET /api/admin/exports?type=ONCE_PTP|ONCE_PRT|AGENT_DISPOSITIONS|AGENT_CASES&from=YYYY-MM-DD&to=YYYY-MM-DD
-import pool from '../config/mysql.js';
+import ExcelJS from "exceljs";
+import pool from "../config/mysql.js";
 
-// GET /api/admin/exports?type=ONCE_PTP|ONCE_PRT|AGENT_DISPOSITIONS|AGENT_CASES&from=YYYY-MM-DD&to=YYYY-MM-DD
 export const exportAdminData = async (req, res) => {
   try {
-    // 🔐 Auth guard
     if (!req.user || req.user.role !== "ADMIN") {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const { type } = req.query;
+    const workbook = new ExcelJS.Workbook();
 
-    if (!["ONCE_PTP", "ONCE_PRT"].includes(type)) {
-      return res.status(400).json({ message: "Invalid export type" });
+    /* ===============================
+       HELPER: EXPORT TABLE AS SHEET
+       =============================== */
+    const exportTable = async (sheetName, sql) => {
+      const [rows] = await pool.query(sql);
+      const sheet = workbook.addWorksheet(sheetName);
+      if (!rows.length) return;
+
+      sheet.columns = Object.keys(rows[0]).map(k => ({
+        header: k,
+        key: k,
+      }));
+      rows.forEach(r => sheet.addRow(r));
+    };
+
+    /* ===============================
+       RAW TABLE SHEETS (UNCHANGED)
+       =============================== */
+    await exportTable("agent_cases", `SELECT * FROM agent_cases`);
+    await exportTable("agent_dispositions", `SELECT * FROM agent_dispositions`);
+    await exportTable(
+      "agent_dispositions_edit_history",
+      `SELECT * FROM agent_dispositions_edit_history`
+    );
+    await exportTable("agent_targets", `SELECT * FROM agent_targets`);
+    await exportTable("campaigns", `SELECT * FROM campaigns`);
+    await exportTable("campaign_agents", `SELECT * FROM campaign_agents`);
+    await exportTable("coll_data", `SELECT * FROM coll_data`);
+    await exportTable("users", `SELECT * FROM users`);
+
+    /* ===============================
+       PTP / PRT FULL ENRICHED REPORT
+       =============================== */
+    const [ptpRows] = await pool.query(`
+      SELECT
+        ac.id                   AS agent_case_id,
+
+        cd.cust_name            AS customer_name,
+        cd.mobileno             AS mobile_no,
+        cd.loan_agreement_no    AS loan_id,
+
+        ad.disposition,
+        ad.ptp_target,
+        ad.promise_amount,
+        ad.created_at           AS disposition_created_at,
+
+        ac.agent_id,
+        u.username              AS agent_username,
+
+        cd.campaign_id,
+        c.campaign_name
+
+      FROM agent_cases ac
+      JOIN agent_dispositions ad
+        ON ad.agent_case_id = ac.id
+      LEFT JOIN coll_data cd
+        ON cd.id = ac.coll_data_id
+      LEFT JOIN users u
+        ON u.id = ac.agent_id
+      LEFT JOIN campaigns c
+        ON c.id = cd.campaign_id
+      WHERE ad.disposition IN ('PTP','PRT')
+      ORDER BY ad.created_at DESC
+    `);
+
+    const ptpSheet = workbook.addWorksheet("ptp_prt_full_report");
+
+    if (ptpRows.length) {
+      ptpSheet.columns = Object.keys(ptpRows[0]).map(k => ({
+        header: k,
+        key: k,
+      }));
+      ptpRows.forEach(r => ptpSheet.addRow(r));
     }
 
-    const [rows] = await pool.query(
-      `SELECT coll_data_id, constraint_type, triggered_at
-       FROM customer_once_constraints
-       WHERE constraint_type = ?
-       ORDER BY triggered_at DESC`,
-      [type]
+    /* ===============================
+       SEND FILE
+       =============================== */
+    res.setHeader(
+      "Content-Type",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    );
+    res.setHeader(
+      "Content-Disposition",
+      `attachment; filename="full_database_export.xlsx"`
     );
 
-    // Build CSV
-    let csv = "coll_data_id,constraint_type,triggered_at\n";
+    await workbook.xlsx.write(res);
+    res.end();
 
-    rows.forEach(r => {
-      csv += `${r.coll_data_id},${r.constraint_type},${r.triggered_at}\n`;
+  } catch (err) {
+    console.error("EXPORT ERROR:", err);
+    res.status(500).json({ message: "Export failed" });
+  }
+};
+
+export const exportSingleTable = async (req, res) => {
+  try {
+    if (!req.user || req.user.role !== "ADMIN") {
+      return res.status(401).json({ message: "Unauthorized" });
+    }
+
+    const { table, from, to } = req.query;
+
+    /**
+     * Each table explicitly defines:
+     * - base SQL
+     * - date column WITH ALIAS
+     */
+    const TABLES = {
+      agent_cases: {
+        dateColumn: "ac.created_at",
+        sql: `
+          SELECT
+            ac.*,
+            cd.cust_name          AS customer_name,
+            cd.mobileno           AS phone,
+            cd.loan_agreement_no  AS loan_id,
+
+            ac.agent_id,
+            u.username            AS agent_username
+          FROM agent_cases ac
+          LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id
+          LEFT JOIN users u ON u.id = ac.agent_id
+          WHERE 1=1
+        `,
+      },
+
+      agent_dispositions: {
+        dateColumn: "ad.created_at",
+        sql: `
+          SELECT
+            ad.*,
+            cd.cust_name          AS customer_name,
+            cd.mobileno           AS phone,
+            cd.loan_agreement_no  AS loan_id,
+
+            ac.agent_id,
+            u.username            AS agent_username
+          FROM agent_dispositions ad
+          JOIN agent_cases ac ON ac.id = ad.agent_case_id
+          LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id
+          LEFT JOIN users u ON u.id = ac.agent_id
+          WHERE 1=1
+        `,
+      },
+
+      customer_once_constraints: {
+        dateColumn: "coc.triggered_at",
+        sql: `
+          SELECT
+            coc.*,
+            cd.cust_name          AS customer_name,
+            cd.mobileno           AS phone,
+            cd.loan_agreement_no  AS loan_id,
+
+            ac.agent_id,
+            u.username            AS agent_username
+          FROM customer_once_constraints coc
+          JOIN agent_dispositions ad ON ad.id = coc.triggered_disposition_id
+          JOIN agent_cases ac ON ac.id = ad.agent_case_id
+          LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id
+          LEFT JOIN users u ON u.id = ac.agent_id
+          WHERE 1=1
+        `,
+      },
+    };
+
+    if (!TABLES[table]) {
+      return res.status(400).json({ message: "Invalid table name" });
+    }
+
+    let sql = TABLES[table].sql;
+    const params = [];
+    const dateCol = TABLES[table].dateColumn;
+
+    // ✅ Date filter with qualified column
+    if (from && to) {
+      sql += ` AND ${dateCol} BETWEEN ? AND ?`;
+      params.push(from, to);
+    } else if (from) {
+      sql += ` AND ${dateCol} >= ?`;
+      params.push(from);
+    } else if (to) {
+      sql += ` AND ${dateCol} <= ?`;
+      params.push(to);
+    }
+
+    sql += ` ORDER BY ${dateCol} DESC`;
+
+    const [rows] = await pool.query(sql, params);
+
+    if (!rows.length) {
+      return res.status(200).send("No data available");
+    }
+
+    /* ===============================
+       BUILD CSV
+       =============================== */
+    const headers = Object.keys(rows[0]);
+    let csv = headers.join(",") + "\n";
+
+    rows.forEach(row => {
+      csv += headers
+        .map(h =>
+          row[h] === null || row[h] === undefined
+            ? ""
+            : `"${String(row[h]).replace(/"/g, '""')}"`
+        )
+        .join(",") + "\n";
     });
 
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="${type}.csv"`
+      `attachment; filename="${table}_export.csv"`
     );
 
     res.status(200).send(csv);
 
   } catch (err) {
-    console.error("EXPORT ERROR:", err);
+    console.error("SINGLE EXPORT ERROR:", err);
     res.status(500).json({ message: "Export failed" });
   }
 };
