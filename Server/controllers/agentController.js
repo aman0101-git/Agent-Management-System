@@ -1,3 +1,10 @@
+import pool from '../config/mysql.js';
+import {
+  DISPOSITION_RULES,
+  validateDispositionData,
+  getResultStatus,
+} from '../config/dispositionRules.js';
+
 // GET /api/customers/:collDataId/once-constraints
 export const getOnceConstraints = async (req, res) => {
   const { collDataId } = req.params;
@@ -11,17 +18,10 @@ export const getOnceConstraints = async (req, res) => {
     res.status(500).json({ message: 'Failed to fetch once constraints', error: err.message });
   }
 };
-import pool from '../config/mysql.js';
-import {
-  DISPOSITION_RULES,
-  validateDispositionData,
-  getResultStatus,
-} from '../config/dispositionRules.js';
 
 /**
  * GET /api/agent/cases
  * Fetch agent dashboard list from Coll_Data table
- * ISSUE #12 FIX: Enforce campaign-to-agent mapping - agents only see their campaign data
  * Excludes IN_PROCESS status (Rechurn) data
  */
 export const getAgentCases = async (req, res) => {
@@ -165,7 +165,6 @@ export const getAgentCaseById = async (req, res) => {
 
     /* ===============================
        3️⃣ Fetch disposition history
-       ISSUE #8 FIX: Include ptp_target in query
        =============================== */
     const [dispositions] = await pool.query(
       `
@@ -435,7 +434,24 @@ export const submitDisposition = async (req, res) => {
     );
 
     const insertedDispositionId = result.insertId;
-    // ONCE_PTP/ONCE_PRT constraint logic removed: allow multiple PTP/PRT submissions
+    
+    // ==========================================
+    // NEW LOGIC: Add to customer_once_constraints for PTP/PRT only once
+    // ==========================================
+    if (disposition === 'PTP' || disposition === 'PRT') {
+      const constraintType = disposition === 'PTP' ? 'ONCE_PTP' : 'ONCE_PRT';
+      // Check if already present for this customer and disposition
+      const [[existingConstraint]] = await conn.query(
+        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = ? AND is_active = 1 LIMIT 1`,
+        [collDataId, constraintType]
+      );
+      if (!existingConstraint) {
+        await conn.query(
+          `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active) VALUES (?, ?, ?, NOW(), 1)`,
+          [collDataId, constraintType, insertedDispositionId]
+        );
+      }
+    }
 
     // ==========================================
     // ALWAYS UPDATE AGENT_CASE (FIXED)
@@ -493,11 +509,9 @@ export const submitDisposition = async (req, res) => {
   }
 };
 
-
 /**
  * GET /api/agent/cases/next
  * Allocate and fetch a single next queued case for the agent
- * ISSUE #12 FIX: Only assign cases from campaigns the agent is mapped to
  */
 export const getNextCase = async (req, res) => {
   const conn = await pool.getConnection();

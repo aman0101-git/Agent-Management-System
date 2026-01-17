@@ -390,10 +390,14 @@ export const getAllAgentTargets = async (req, res) => {
 
     const [targets] = await pool.query(query, params);
 
+    // Calculate total target amount (sum of all target_amounts)
+    const total_target_amount = targets.reduce((sum, t) => sum + (t.target_amount || 0), 0);
+
     res.json({ 
       filters: { month: month || 'all' },
       targets: targets,
-      count: targets.length 
+      count: targets.length,
+      total_target_amount
     });
 
   } catch (err) {
