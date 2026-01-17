@@ -160,19 +160,19 @@ const AgentDashboard = () => {
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200">
       {/* Header */}
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-6 py-4 flex justify-between items-center">
+        <div className="mx-auto max-w-7xl px-2 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">
+            <h1 className="text-lg sm:text-xl font-semibold text-slate-900">
               Welcome, {user?.firstName} {user?.lastName}
             </h1>
-            <p className="text-sm text-slate-500">
+            <p className="text-xs sm:text-sm text-slate-500">
               {filteredCases.length} allocated accounts
             </p>
           </div>
 
           <Button
             onClick={logout}
-            className="bg-rose-600 text-white hover:bg-rose-700 shadow-md"
+            className="bg-rose-600 text-white hover:bg-rose-700 shadow-md w-full sm:w-auto"
           >
             Logout
           </Button>
@@ -181,22 +181,22 @@ const AgentDashboard = () => {
 
       {/* Navigation Tabs */}
       <nav className="border-b bg-white sticky top-16 z-10">
-        <div className="mx-auto max-w-7xl px-6 flex gap-8">
+        <div className="mx-auto max-w-7xl px-2 sm:px-6 flex flex-col sm:flex-row gap-2 sm:gap-8">
           <Link
             to="/agent/dashboard"
-            className="py-3 px-1 text-sm font-medium border-b-2 border-blue-600 text-blue-600"
+            className="py-3 px-1 text-xs sm:text-sm font-medium border-b-2 border-blue-600 text-blue-600"
           >
             My Allocations
           </Link>
           <Link
             to="/agent/search"
-            className="py-3 px-1 text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
+            className="py-3 px-1 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
           >
             Customer Search
           </Link>
           <Link
             to="/agent/analytics"
-            className="py-3 px-1 text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
+            className="py-3 px-1 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
           >
             Performance Analytics
           </Link>
@@ -204,18 +204,18 @@ const AgentDashboard = () => {
       </nav>
 
       {/* Main */}
-      <main className="mx-auto max-w-7xl px-6 py-8">
+      <main className="mx-auto max-w-7xl px-2 sm:px-6 py-4 sm:py-8">
 
-        <div className="flex items-center justify-between mb-6">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between mb-6 gap-2">
           <input
             type="text"
             placeholder="Search by name, phone, or loan ID"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm"
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-xs sm:text-sm"
           />
           <button
-            className="ml-4 px-2 py-1 rounded bg-indigo-600 text-white font-medium shadow hover:bg-indigo-700 transition disabled:opacity-60 text-xs"
+            className="sm:ml-4 mt-2 sm:mt-0 px-2 py-1 rounded bg-indigo-600 text-white font-medium shadow hover:bg-indigo-700 transition disabled:opacity-60 text-xs"
             style={{ minWidth: 70 }}
             disabled={fetchingNext}
             onClick={async () => {
@@ -245,8 +245,8 @@ const AgentDashboard = () => {
         </div>
 
         {!loading && sortedCases.length > 0 && (
-          <div className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="grid grid-cols-12 gap-4 bg-slate-50 px-4 py-3 border-b border-slate-200 text-sm font-semibold">
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="min-w-[900px] grid grid-cols-12 gap-4 bg-slate-50 px-4 py-3 border-b border-slate-200 text-xs sm:text-sm font-semibold">
               <div className="col-span-2">Name</div>
               <div className="col-span-1">Phone</div>
               <div className="col-span-2">Loan ID</div>
@@ -262,7 +262,7 @@ const AgentDashboard = () => {
             {sortedCases.map((caseItem) => (
               <div key={caseItem.case_id}>
                 <button
-                  className={`w-full grid grid-cols-12 gap-4 px-4 py-3 border-b border-slate-100 text-sm text-left transition
+                  className={`w-full min-w-[900px] grid grid-cols-12 gap-4 px-4 py-3 border-b border-slate-100 text-xs sm:text-sm text-left transition
                     ${getFollowUpRowColor(caseItem)}`}
                 >
                   <div className="col-span-2 font-medium truncate">

@@ -200,9 +200,9 @@ const ManageCampaigns = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-6">
-      <div className="mx-auto max-w-2xl rounded-2xl border border-slate-200 bg-white p-6 shadow-lg shadow-slate-100">
-        <h2 className="mb-6 text-xl font-semibold text-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-white to-slate-100 p-2 sm:p-4 md:p-6">
+      <div className="mx-auto w-full max-w-2xl rounded-2xl border border-slate-200 bg-white p-2 sm:p-4 md:p-6 shadow-lg shadow-slate-100">
+        <h2 className="mb-6 text-lg sm:text-xl font-semibold text-slate-900">
           Manage Campaigns
         </h2>
 
@@ -223,13 +223,13 @@ const ManageCampaigns = () => {
               key={c.id}
               className="mb-4 rounded-xl border border-slate-200 bg-white transition hover:shadow-md"
             >
-              <div className="flex items-center justify-between px-4 py-3">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between px-2 sm:px-4 py-3 gap-2">
                 <div className="flex-1">
-                  <p className="font-medium text-slate-900">
+                  <p className="font-medium text-slate-900 text-base sm:text-lg">
                     {c.campaign_name}
                   </p>
 
-                  <div className="mt-2 flex gap-2">
+                  <div className="mt-2 flex flex-wrap gap-2">
                     <span
                       className={`rounded-full px-3 py-0.5 text-xs font-semibold ${
                         isActive
@@ -254,7 +254,7 @@ const ManageCampaigns = () => {
                   </div>
                 </div>
 
-                <div className="flex gap-2">
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
                   <Button
                     size="sm"
                     className={
@@ -287,58 +287,56 @@ const ManageCampaigns = () => {
               </div>
 
               {expandedId === c.id && summary && (
-                <div className="border-t bg-slate-50 px-4 py-4">
-                  <div className="mb-4 grid grid-cols-2 gap-4">
+                <div className="border-t bg-slate-50 px-2 sm:px-4 py-4">
+                  <div className="mb-4 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="rounded-lg border bg-white p-3">
-                      <p className="text-sm text-slate-600">
+                      <p className="text-xs sm:text-sm text-slate-600">
                         Total Data Uploaded
                       </p>
-                      <p className="text-2xl font-bold text-slate-900">
+                      <p className="text-xl sm:text-2xl font-bold text-slate-900">
                         {summary.totalRecords}
                       </p>
                     </div>
 
                     <div className="rounded-lg border bg-white p-3">
-                      <p className="text-sm text-slate-600">
+                      <p className="text-xs sm:text-sm text-slate-600">
                         Total Agents Assigned
                       </p>
-                      <p className="text-2xl font-bold text-slate-900">
+                      <p className="text-xl sm:text-2xl font-bold text-slate-900">
                         {summary.agents?.length || 0}
                       </p>
                     </div>
 
                     <div className="rounded-lg border bg-white p-3">
-                      <p className="text-sm text-slate-600">
+                      <p className="text-xs sm:text-sm text-slate-600">
                         Total Data Distributed
                       </p>
-                      <p className="text-2xl font-bold text-emerald-500">
+                      <p className="text-xl sm:text-2xl font-bold text-emerald-500">
                         {summary.assignedRecords}
                       </p>
                     </div>
 
                     <div className="rounded-lg border bg-white p-3">
-                      <p className="text-sm text-slate-600">
+                      <p className="text-xs sm:text-sm text-slate-600">
                         Total Data Unassigned
                       </p>
-                      <p className="text-2xl font-bold text-rose-500">
+                      <p className="text-xl sm:text-2xl font-bold text-rose-500">
                         {summary.unassignedRecords}
                       </p>
                     </div>
                   </div>
 
-                  <div className="mb-4 flex justify-between items-end gap-4">
-                    
-
+                  <div className="mb-4 flex flex-col sm:flex-row justify-between items-end gap-4">
                     <Button
                       onClick={() => handleRechurnClick(c.id)}
-                      className="bg-orange-100 text-orange-700 hover:bg-orange-200"
+                      className="bg-orange-100 text-orange-700 hover:bg-orange-200 w-full sm:w-auto"
                     >
                       RECHURN
                     </Button>
                   </div>
 
                   {summary.agents && summary.agents.length > 0 && (
-                    <div className="overflow-hidden rounded-lg border bg-white">
+                    <div className="overflow-x-auto rounded-lg border bg-white">
                       <div className="border-b bg-slate-100 px-4 py-3">
                         <p className="text-sm font-semibold text-slate-900">
                           Per-Agent Allocation
@@ -349,7 +347,7 @@ const ManageCampaigns = () => {
                         {summary.agents.map((agent) => (
                           <div
                             key={agent.agent_id}
-                            className="flex items-center justify-between px-4 py-3 hover:bg-slate-50"
+                            className="flex flex-col sm:flex-row items-start sm:items-center justify-between px-2 sm:px-4 py-3 gap-2 hover:bg-slate-50"
                           >
                             <div>
                               <p className="text-sm font-medium text-slate-900">
@@ -360,7 +358,14 @@ const ManageCampaigns = () => {
                               </p>
                             </div>
 
-                            <div className="text-right flex flex-col items-end gap-2">
+                            <div className="text-right flex flex-col items-end gap-2 w-full sm:w-auto">
+                              <div>
+                                <p className="text-xs text-slate-600">Monthly Target</p>
+                                <p className="text-xl sm:text-2xl font-bold text-purple-700">
+                                  ₹{(agentTargets[agent.agent_id] ?? 0).toLocaleString("en-IN")}
+                                </p>
+                              </div>
+
                               <div>
                                 <p className="text-lg font-bold text-indigo-500">
                                   {agent.allocated_count}
@@ -370,47 +375,40 @@ const ManageCampaigns = () => {
                                 </p>
                               </div>
 
-                            {editingAgent !== agent.agent_id ? (
-                              <div className="flex items-center gap-3 bg-purple-50 px-4 py-3 rounded-lg">
-                                <div>
-                                  <p className="text-xs text-slate-600">Monthly Target</p>
-                                  <p className="text-2xl font-bold text-purple-700">
-                                    ₹{(agentTargets[agent.agent_id] ?? 0).toLocaleString("en-IN")}
-                                  </p>
+                              {editingAgent !== agent.agent_id ? (
+                                <div className="flex flex-col sm:flex-row items-center gap-2 bg-purple-50 px-2 sm:px-4 py-2 sm:py-3 rounded-lg w-full sm:w-auto">
+                                  <Button
+                                    size="sm"
+                                    className="bg-purple-600 text-white hover:bg-purple-700 w-full sm:w-auto"
+                                    onClick={() => setEditingAgent(agent.agent_id)}
+                                  >
+                                    Edit Target
+                                  </Button>
                                 </div>
+                              ) : (
+                                <div className="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto">
+                                  <input
+                                    type="number"
+                                    value={agentTargets[agent.agent_id] ?? ""}
+                                    onChange={(e) =>
+                                      setAgentTargets((prev) => ({
+                                        ...prev,
+                                        [agent.agent_id]: e.target.value,
+                                      }))
+                                    }
+                                    className="w-full sm:w-36 rounded-lg border border-purple-200 px-2 py-1 text-sm"
+                                  />
 
-                                <Button
-                                  size="sm"
-                                  className="bg-purple-600 text-white hover:bg-purple-700"
-                                  onClick={() => setEditingAgent(agent.agent_id)}
-                                >
-                                  Edit Target
-                                </Button>
-                              </div>
-                            ) : (
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="number"
-                                  value={agentTargets[agent.agent_id] ?? ""}
-                                  onChange={(e) =>
-                                    setAgentTargets((prev) => ({
-                                      ...prev,
-                                      [agent.agent_id]: e.target.value,
-                                    }))
-                                  }
-                                  className="w-36 rounded-lg border border-purple-200 px-2 py-1 text-sm"
-                                />
-
-                                <Button
-                                  onClick={() => handleSetAgentTarget(agent.agent_id)}
-                                  disabled={settingAgentTarget[agent.agent_id]}
-                                  className="bg-purple-600 text-white hover:bg-purple-700"
-                                  size="sm"
-                                >
-                                  {settingAgentTarget[agent.agent_id] ? "Setting..." : "Set Target"}
-                                </Button>
-                              </div>
-                            )}
+                                  <Button
+                                    onClick={() => handleSetAgentTarget(agent.agent_id)}
+                                    disabled={settingAgentTarget[agent.agent_id]}
+                                    className="bg-purple-600 text-white hover:bg-purple-700 w-full sm:w-auto"
+                                    size="sm"
+                                  >
+                                    {settingAgentTarget[agent.agent_id] ? "Setting..." : "Set Target"}
+                                  </Button>
+                                </div>
+                              )}
 
                             </div>
                           </div>
@@ -425,7 +423,7 @@ const ManageCampaigns = () => {
         })}
 
         {error && (
-          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-600">
+          <div className="mt-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs sm:text-sm font-medium text-rose-600">
             {error}
           </div>
         )}

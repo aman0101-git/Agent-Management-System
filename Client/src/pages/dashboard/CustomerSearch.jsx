@@ -61,33 +61,33 @@ const CustomerSearch = () => {
   };
 
   return (
-    <div className="p-6 bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+    <div className="p-2 sm:p-4 md:p-6 bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-3xl font-bold text-slate-900 mb-2">
+          <h1 className="text-xl sm:text-3xl font-bold text-slate-900 mb-2">
             Customer Search
           </h1>
-          <p className="text-slate-600">
+          <p className="text-xs sm:text-base text-slate-600">
             Search any customer by Loan ID, Name, or Phone Number
           </p>
         </div>
 
         {/* Search Section */}
-        <div className="bg-white rounded-lg shadow-md p-6 mb-8">
-          <div className="flex gap-3">
+        <div className="bg-white rounded-lg shadow-md p-3 sm:p-6 mb-8">
+          <div className="flex flex-col sm:flex-row gap-3">
             <input
               type="text"
               placeholder="Enter Loan ID, Customer Name, or Phone Number..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-base"
             />
             <Button
               onClick={handleSearch}
               disabled={loading}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium"
+              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium"
             >
               {loading ? "Searching..." : "Search"}
             </Button>
@@ -96,40 +96,40 @@ const CustomerSearch = () => {
 
         {/* Results Section */}
         {hasSearched && (
-          <div className="bg-white rounded-lg shadow-md overflow-hidden">
+          <div className="bg-white rounded-lg shadow-md overflow-x-auto">
             {results.length === 0 ? (
               <div className="p-8 text-center text-slate-600">
-                <p className="text-lg font-medium">
+                <p className="text-base sm:text-lg font-medium">
                   No customers found matching "{searchInput}"
                 </p>
               </div>
             ) : (
               <>
                 <div className="p-4 bg-slate-50 border-b border-slate-200">
-                  <p className="text-sm font-medium text-slate-700">
+                  <p className="text-xs sm:text-sm font-medium text-slate-700">
                     Found {results.length} customer(s)
                   </p>
                 </div>
                 <div className="overflow-x-auto">
-                  <table className="w-full">
+                  <table className="w-full min-w-[700px]">
                     <thead className="bg-slate-100 border-b border-slate-200">
                       <tr>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
                           Loan ID
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
                           Customer Name
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
                           Phone
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
                           Outstanding
                         </th>
-                        <th className="px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
+                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
                           Loan Status
                         </th>
-                        <th className="px-6 py-3 text-center text-xs font-semibold text-slate-700 uppercase">
+                        <th className="px-4 sm:px-6 py-3 text-center text-xs font-semibold text-slate-700 uppercase">
                           Action
                         </th>
                       </tr>
@@ -137,30 +137,30 @@ const CustomerSearch = () => {
                     <tbody className="divide-y divide-slate-200">
                       {results.map((customer) => (
                         <tr key={customer.id} className="hover:bg-slate-50">
-                          <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm font-medium text-slate-900">
                             {customer.loan_agreement_no}
                           </td>
-                          <td className="px-6 py-4 text-sm text-slate-700">
+                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm text-slate-700">
                             {customer.cust_name}
                           </td>
-                          <td className="px-6 py-4 text-sm text-slate-700">
+                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm text-slate-700">
                             {customer.mobileno}
                           </td>
-                          <td className="px-6 py-4 text-sm font-medium text-slate-900">
+                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm font-medium text-slate-900">
                             {formatCurrency(customer.amt_outst)}
                           </td>
-                          <td className="px-6 py-4 text-sm">
+                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm">
                             <span className="inline-block px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
                               {customer.loan_status || "ACTIVE"}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-center">
+                          <td className="px-4 sm:px-6 py-4 text-center">
                             <Button
                               onClick={() => {
                                 setSelectedCaseId(customer.id);
                                 setDrawerOpen(true);
                               }}
-                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded text-sm font-medium"
+                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded text-xs sm:text-sm font-medium"
                             >
                               Open
                             </Button>
@@ -177,10 +177,10 @@ const CustomerSearch = () => {
 
         {/* Empty State */}
         {!hasSearched && (
-          <div className="bg-white rounded-lg shadow-md p-12 text-center">
+          <div className="bg-white rounded-lg shadow-md p-8 sm:p-12 text-center">
             <div className="text-slate-400 mb-4">
               <svg
-                className="w-16 h-16 mx-auto"
+                className="w-12 h-12 sm:w-16 sm:h-16 mx-auto"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -193,7 +193,7 @@ const CustomerSearch = () => {
                 />
               </svg>
             </div>
-            <p className="text-slate-600 text-lg">
+            <p className="text-slate-600 text-base sm:text-lg">
               Start searching to find customers
             </p>
           </div>

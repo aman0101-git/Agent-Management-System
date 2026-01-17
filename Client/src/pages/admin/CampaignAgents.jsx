@@ -117,61 +117,59 @@ const CampaignAgents = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 p-6">
-
-      <div className="mx-auto max-w-3xl rounded-2xl border bg-white p-6 shadow-xl">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 p-2 sm:p-4 md:p-6">
+      <div className="mx-auto w-full max-w-3xl rounded-2xl border bg-white p-2 sm:p-4 md:p-6 shadow-xl flex flex-col">
         {error && (
-          <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
+          <div className="mb-4 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs sm:text-sm font-medium text-rose-700">
             {error}
           </div>
         )}
 
         {/* CREATE CAMPAIGN - moved from UploadData */}
-      <div className="mb-6">
-        {!showCreate ? (
-          <Button
-            onClick={() => setShowCreate(true)}
-            className="bg-green-200 text-black-700 hover:bg-green-300"
-          >
-            Create Campaign
-          </Button>
-        ) : (
-          <div className="flex gap-2">
-            <input
-              value={newCampaignName}
-              onChange={(e) => setNewCampaignName(e.target.value)}
-              placeholder="Campaign name"
-              className="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400/40"
-            />
+        <div className="mb-6">
+          {!showCreate ? (
             <Button
-              onClick={handleCreateCampaign}
-              className="bg-blue-400 text-white hover:bg-blue-500 active:bg-blue-600"
-              disabled={loading}
+              onClick={() => setShowCreate(true)}
+              className="bg-green-200 text-black-700 hover:bg-green-300 w-full sm:w-auto"
             >
-              {loading ? "Saving..." : "Save"}
+              Create Campaign
             </Button>
-            <Button
-              variant="outline"
-              onClick={() => setShowCreate(false)}
-            >
-              Cancel
-            </Button>
-          </div>
-        )}
-        {message && (
-          <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-            {message}
-          </div>
-        )}
-      </div>
+          ) : (
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                value={newCampaignName}
+                onChange={(e) => setNewCampaignName(e.target.value)}
+                placeholder="Campaign name"
+                className="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-xs sm:text-sm focus:ring-2 focus:ring-indigo-400/40"
+              />
+              <Button
+                onClick={handleCreateCampaign}
+                className="bg-blue-400 text-white hover:bg-blue-500 active:bg-blue-600"
+                disabled={loading}
+              >
+                {loading ? "Saving..." : "Save"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setShowCreate(false)}
+              >
+                Cancel
+              </Button>
+            </div>
+          )}
+          {message && (
+            <div className="mt-2 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs sm:text-sm font-medium text-emerald-700">
+              {message}
+            </div>
+          )}
+        </div>
 
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-xl font-semibold text-slate-900">
+        <div className="mb-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2">
+          <h2 className="text-lg sm:text-xl font-semibold text-slate-900">
             Campaign Agent Allocation
           </h2>
-
           <Button
-            className="bg-blue-400 text-white hover:bg-blue-500 active:bg-blue-600"
+            className="bg-blue-400 text-white hover:bg-blue-500 active:bg-blue-600 w-full sm:w-auto"
             onClick={handleSaveAndRedirect}
           >
             Save
@@ -181,7 +179,7 @@ const CampaignAgents = () => {
         {/* Active Campaigns - fixed height, scrollable */}
         <div className="mb-4 max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
           <select
-            className="w-full bg-transparent px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-400/40 transition outline-none"
+            className="w-full bg-transparent px-3 py-2 text-xs sm:text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-400/40 transition outline-none"
             value={selectedCampaign}
             onChange={(e) => {
               setSelectedCampaign(e.target.value);
@@ -200,67 +198,69 @@ const CampaignAgents = () => {
         {selectedCampaign && (
           <>
             {/* Assigned Agents */}
-            <h3 className="mt-8 mb-3 font-medium text-slate-800">
+            <h3 className="mt-6 mb-3 font-medium text-slate-800 text-base sm:text-lg">
               Assigned Agents
             </h3>
 
             {assignedAgents.length === 0 && (
-              <p className="text-sm text-slate-500 mb-4">
+              <p className="text-xs sm:text-sm text-slate-500 mb-4">
                 No agents assigned yet
               </p>
             )}
 
-            {assignedAgents.map((a) => (
-              <div
-                key={a.id}
-                className="mb-2 flex items-center justify-between rounded-lg border bg-white px-3 py-2 shadow-sm hover:shadow-md transition"
-              >
-                <span className="font-medium text-slate-700">
-                  {a.firstName} {a.lastName}
-                </span>
-                <Button
-                  size="sm"
-                  className="bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800"
-                  onClick={() => removeAgent(a.id)}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {assignedAgents.map((a) => (
+                <div
+                  key={a.id}
+                  className="flex items-center justify-between rounded-lg border bg-white px-3 py-2 shadow-sm hover:shadow-md transition"
                 >
-                  Remove
-                </Button>
-              </div>
-            ))}
+                  <span className="font-medium text-slate-700 text-xs sm:text-sm">
+                    {a.firstName} {a.lastName}
+                  </span>
+                  <Button
+                    size="sm"
+                    className="bg-rose-600 text-white hover:bg-rose-700 active:bg-rose-800"
+                    onClick={() => removeAgent(a.id)}
+                  >
+                    Remove
+                  </Button>
+                </div>
+              ))}
+            </div>
 
             {/* All Agents */}
-            <h3 className="mt-8 mb-3 font-medium text-slate-800">
+            <h3 className="mt-6 mb-3 font-medium text-slate-800 text-base sm:text-lg">
               All Agents
             </h3>
 
-            {agents.map((a) => {
-              const assigned = isAgentAssigned(a.id);
-
-              return (
-                <div
-                  key={a.id}
-                  className="mb-2 flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2"
-                >
-                  <span className="text-slate-700">
-                    {a.firstName} {a.lastName}
-                  </span>
-
-                  {assigned ? (
-                    <Button size="sm" disabled variant="outline">
-                      Added
-                    </Button>
-                  ) : (
-                    <Button
-                      size="sm"
-                      className="bg-teal-600 text-white hover:bg-teal-700 active:bg-teal-800"
-                      onClick={() => assignAgent(a.id)}
-                    >
-                      Add
-                    </Button>
-                  )}
-                </div>
-              );
-            })}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {agents.map((a) => {
+                const assigned = isAgentAssigned(a.id);
+                return (
+                  <div
+                    key={a.id}
+                    className="flex items-center justify-between rounded-lg border bg-slate-50 px-3 py-2"
+                  >
+                    <span className="text-slate-700 text-xs sm:text-sm">
+                      {a.firstName} {a.lastName}
+                    </span>
+                    {assigned ? (
+                      <Button size="sm" disabled variant="outline">
+                        Added
+                      </Button>
+                    ) : (
+                      <Button
+                        size="sm"
+                        className="bg-teal-600 text-white hover:bg-teal-700 active:bg-teal-800"
+                        onClick={() => assignAgent(a.id)}
+                      >
+                        Add
+                      </Button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
       </div>

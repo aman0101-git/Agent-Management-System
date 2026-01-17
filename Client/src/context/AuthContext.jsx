@@ -37,7 +37,7 @@ export const AuthProvider = ({ children }) => {
     setError(null);
 
     try {
-      const res = await axios.post(API_LOGIN, { username, password });
+      const res = await axios.post(API_LOGIN, { username, password }, { withCredentials: true });
 
       if (res.data?.token && res.data?.user) {
         const { token: tkn, user: u, expiresAt } = res.data;

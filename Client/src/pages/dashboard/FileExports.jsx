@@ -112,28 +112,28 @@ const FileExports = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 flex items-center justify-center">
-      <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-xl space-y-10">
+    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200 flex items-center justify-center p-2 sm:p-4 md:p-6">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-xl space-y-8 p-3 sm:p-6 md:p-8">
 
         {/* ===============================
             MODE 1 UI
            =============================== */}
         <section>
-          <h1 className="text-xl font-semibold text-slate-900 mb-2">
+          <h1 className="text-lg sm:text-xl font-semibold text-slate-900 mb-2">
             Full Database Export
           </h1>
-          <p className="text-sm text-slate-600 mb-4">
+          <p className="text-xs sm:text-sm text-slate-600 mb-4">
             Downloads one Excel file containing all tables and the PTP/PRT report.
           </p>
 
           {errorFull && (
-            <div className="text-sm text-rose-600 mb-3">{errorFull}</div>
+            <div className="text-xs sm:text-sm text-rose-600 mb-3">{errorFull}</div>
           )}
 
           <Button
             onClick={handleFullExport}
             disabled={loadingFull}
-            className="bg-gradient-to-r from-pink-500 to-rose-500 text-white"
+            className="w-full sm:w-auto bg-gradient-to-r from-pink-500 to-rose-500 text-white"
           >
             {loadingFull ? "Exporting..." : "Download Excel"}
           </Button>
@@ -145,32 +145,32 @@ const FileExports = () => {
             MODE 2 UI
            =============================== */}
         <section>
-          <h2 className="text-lg font-semibold text-slate-900 mb-2">
+          <h2 className="text-base sm:text-lg font-semibold text-slate-900 mb-2">
             Table Export (With Date Range)
           </h2>
-          <p className="text-sm text-slate-600 mb-4">
+          <p className="text-xs sm:text-sm text-slate-600 mb-4">
             Export a single table as CSV for a selected time period.
           </p>
 
-          <label className="block text-sm font-medium mb-1">Select Table</label>
+          <label className="block text-xs sm:text-sm font-medium mb-1">Select Table</label>
           <select
             value={table}
             onChange={e => setTable(e.target.value)}
-            className="w-full border rounded px-3 py-2 mb-4"
+            className="w-full border rounded px-3 py-2 mb-4 text-xs sm:text-sm"
           >
             {TABLES.map(t => (
               <option key={t} value={t}>{t}</option>
             ))}
           </select>
 
-          <div className="flex gap-3 mb-4">
+          <div className="flex flex-col sm:flex-row gap-3 mb-4">
             <div className="flex-1">
               <label className="block text-xs font-medium mb-1">From</label>
               <input
                 type="date"
                 value={from}
                 onChange={e => setFrom(e.target.value)}
-                className="w-full border rounded px-2 py-1"
+                className="w-full border rounded px-2 py-1 text-xs sm:text-sm"
               />
             </div>
             <div className="flex-1">
@@ -179,19 +179,19 @@ const FileExports = () => {
                 type="date"
                 value={to}
                 onChange={e => setTo(e.target.value)}
-                className="w-full border rounded px-2 py-1"
+                className="w-full border rounded px-2 py-1 text-xs sm:text-sm"
               />
             </div>
           </div>
 
           {errorTable && (
-            <div className="text-sm text-rose-600 mb-3">{errorTable}</div>
+            <div className="text-xs sm:text-sm text-rose-600 mb-3">{errorTable}</div>
           )}
 
           <Button
             onClick={handleTableExport}
             disabled={loadingTable}
-            className="bg-indigo-600 text-white"
+            className="w-full sm:w-auto bg-indigo-600 text-white"
           >
             {loadingTable ? "Exporting..." : "Export CSV"}
           </Button>

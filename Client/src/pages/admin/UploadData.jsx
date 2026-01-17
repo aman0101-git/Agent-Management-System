@@ -76,7 +76,6 @@ const UploadData = () => {
         formData,
         { headers }
       );
-      // ISSUE #3 FIX: Display rows uploaded from backend response
       const rowsUploaded = res.data.rowsUploaded || 0;
       const successMsg = rowsUploaded > 0 
         ? `${rowsUploaded} rows uploaded successfully`
