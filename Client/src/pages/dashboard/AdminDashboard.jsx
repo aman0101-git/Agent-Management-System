@@ -1,6 +1,7 @@
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
+import FileExports from "./FileExports";
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
@@ -12,7 +13,7 @@ const AdminDashboard = () => {
         <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
           <div>
             <h1 className="text-xl font-semibold text-slate-900">
-              Admin Dashboard
+              Welcome, {user?.firstName} {user?.lastName}
             </h1>
             <p className="text-sm text-slate-500">
               Control & monitor system operations
@@ -31,14 +32,6 @@ const AdminDashboard = () => {
 
       {/* Main */}
       <main className="mx-auto max-w-7xl px-6 py-10">
-        {/* User Info */}
-        <div className="mb-10">
-          <p className="text-sm text-slate-500">Logged in as</p>
-          <p className="text-lg font-semibold text-slate-900">
-            Welcome, {user.firstName}
-          </p>
-        </div>
-
         {/* Action Cards */}
         <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {[
@@ -51,15 +44,7 @@ const AdminDashboard = () => {
               hover: "hover:from-teal-600 hover:to-cyan-600",
             },
             {
-              title: "Data Allocation",
-              desc: "Upload monthly data and assign accounts.",
-              action: "Upload Monthly Data",
-              link: "/admin/upload-data",
-              base: "from-indigo-500 to-violet-500",
-              hover: "hover:from-indigo-600 hover:to-violet-600",
-            },
-            {
-              title: "Agent Allocation",
+              title: "Create Campaign & Agent Allocation",
               desc: "Assign agents to campaigns.",
               action: "Allocate Agents",
               link: "/admin/campaign-agents",
@@ -67,12 +52,36 @@ const AdminDashboard = () => {
               hover: "hover:from-emerald-600 hover:to-teal-600",
             },
             {
+              title: "Data Allocation",
+              desc: "Upload monthly data and assign accounts.",
+              action: "Upload Monthly Data",
+              link: "/admin/upload-data",
+              base: "from-indigo-500 to-violet-500",
+              hover: "hover:from-indigo-600 hover:to-violet-600",
+            },            
+            {
               title: "Campaign Management",
               desc: "Activate or deactivate campaigns.",
               action: "Manage Campaigns",
               link: "/admin/campaigns",
               base: "from-blue-500 to-indigo-500",
               hover: "hover:from-blue-600 hover:to-indigo-600",
+            },
+            {
+              title: "Monitoring & Analysis",
+              desc: "Track agent performance and activity.",
+              action: "Open Monitoring",
+              link: "/admin/monitoring-analytics",
+              base: "from-amber-500 to-orange-500",
+              hover: "hover:from-amber-600 hover:to-orange-600",
+            },
+            {
+              title: "File Exports",
+              desc: "Export MySQL data to Excel files.",
+              action: "Go to File Exports",
+              link: "/admin/file-exports",
+              base: "from-pink-500 to-rose-500",
+              hover: "hover:from-pink-600 hover:to-rose-600",
             },
           ].map((item) => (
             <div
@@ -95,20 +104,6 @@ const AdminDashboard = () => {
               </Link>
             </div>
           ))}
-
-          {/* Disabled Card */}
-          <div className="rounded-2xl border border-slate-200 bg-slate-50 p-6">
-            <h2 className="text-lg font-semibold text-slate-700">
-              Monitoring
-            </h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Track agent performance and activity.
-            </p>
-
-            <Button disabled className="mt-5 w-full">
-              Coming Soon
-            </Button>
-          </div>
         </div>
       </main>
     </div>

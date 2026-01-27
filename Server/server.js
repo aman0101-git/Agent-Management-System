@@ -10,9 +10,14 @@ import dataRoutes from "./routes/dataRoutes.js";
 import campaignRoutes from "./routes/campaignRoutes.js";
 import campaignAgentRoutes from "./routes/campaignAgentRoutes.js";
 import agentRoutes from './routes/agentRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import path from 'path';
+import { fileURLToPath } from 'url';
 
 const app = express();
 const port = process.env.PORT || 5000;
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 (async () => {
   try {
@@ -30,7 +35,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 app.use(cors({
-  origin: 'http://localhost:5173',
+  origin: true,
   credentials: true,
 }));
 
@@ -38,10 +43,16 @@ app.use(cors({
 app.get('/', (req, res) => res.send('API Working...'));
 app.use('/api/auth', authRoute);
 app.use('/api/users', userRoutes);
+app.use('/api/agent', agentRoutes);
+app.use('/api/admin', adminRoutes);
 app.use("/api/data", dataRoutes);
 app.use("/api/campaigns", campaignRoutes);
 app.use("/api/campaigns", campaignAgentRoutes);
-app.use('/api/agent', agentRoutes);
+
+// ✅ Frontend fallback LAST
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(__dirname, 'dist', 'index.html'));
+});
 
 // Start server
 app.listen(port, () => {

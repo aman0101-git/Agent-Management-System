@@ -11,8 +11,6 @@ const UploadData = () => {
   const [campaigns, setCampaigns] = useState([]);
   const [campaignId, setCampaignId] = useState("");
 
-  const [showCreate, setShowCreate] = useState(false);
-  const [newCampaignName, setNewCampaignName] = useState("");
 
   const [editId, setEditId] = useState(null);
   const [editName, setEditName] = useState("");
@@ -37,31 +35,7 @@ const UploadData = () => {
     fetchCampaigns();
   }, []);
 
-  // Create campaign
-  const handleCreateCampaign = async () => {
-    if (!newCampaignName.trim()) {
-      setError("Campaign name required");
-      return;
-    }
-
-    try {
-      setLoading(true);
-      await axios.post(
-        "http://localhost:5000/api/campaigns",
-        { campaign_name: newCampaignName },
-        { headers }
-      );
-      setNewCampaignName("");
-      setShowCreate(false);
-      fetchCampaigns();
-      setMessage("Campaign created successfully");
-    } catch {
-      setError("Failed to create campaign");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  
   // Edit campaign
   const handleEditSave = async (id) => {
     if (!editName.trim()) {
@@ -102,9 +76,13 @@ const UploadData = () => {
         formData,
         { headers }
       );
-      setMessage(res.data.message || "Upload completed");
-    } catch {
-      setError("Upload failed");
+      const rowsUploaded = res.data.rowsUploaded || 0;
+      const successMsg = rowsUploaded > 0 
+        ? `${rowsUploaded} rows uploaded successfully`
+        : res.data.message || "Upload completed";
+      setMessage(successMsg);
+    } catch (err) {
+      setError(err?.response?.data?.message || err?.message || "Upload failed");
     } finally {
       setLoading(false);
     }
@@ -117,81 +95,51 @@ const UploadData = () => {
           Campaign Management & Upload
         </h2>
 
-        {/* CREATE CAMPAIGN */}
-        <div className="mb-6">
-          {!showCreate ? (
-            <Button
-              onClick={() => setShowCreate(true)}
-              className="bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800 shadow"
-            >
-              Create Campaign
-            </Button>
-          ) : (
-            <div className="flex gap-2">
-              <input
-                value={newCampaignName}
-                onChange={(e) => setNewCampaignName(e.target.value)}
-                placeholder="Campaign name"
-                className="flex-1 rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm focus:ring-2 focus:ring-indigo-400/40"
-              />
-              <Button
-                onClick={handleCreateCampaign}
-                className="bg-indigo-600 text-white hover:bg-indigo-700 active:bg-indigo-800"
-              >
-                Save
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => setShowCreate(false)}
-              >
-                Cancel
-              </Button>
-            </div>
-          )}
-        </div>
+        
 
         {/* CAMPAIGN LIST */}
         <div className="mb-8">
           <h3 className="mb-3 font-medium text-slate-800">
             Active Campaigns
           </h3>
-
-          {campaigns.map((c) => (
-            <div
-              key={c.id}
-              className="mb-2 flex items-center justify-between rounded-lg border bg-white px-3 py-2 shadow-sm"
-            >
-              {editId === c.id ? (
-                <>
-                  <input
-                    value={editName}
-                    onChange={(e) => setEditName(e.target.value)}
-                    className="flex-1 rounded border px-2 py-1 text-sm"
-                  />
-                  <Button
-                    size="sm"
-                    className="bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700"
-                    onClick={() => handleEditSave(c.id)}
-                  >
-                    Save
-                  </Button>
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={() => setEditId(null)}
-                  >
-                    Cancel
-                  </Button>
-                </>
-              ) : (
-                <>
-                  <p className="font-medium text-slate-700">
-                    {c.campaign_name}
-                  </p>
-                </>
-              )}
-            </div>
-          ))}
+          <div className="max-h-40 overflow-y-auto rounded-lg border border-slate-200 bg-slate-50 p-2">
+            {campaigns.map((c) => (
+              <div
+                key={c.id}
+                className="mb-2 flex items-center justify-between rounded-lg border bg-white px-3 py-2 shadow-sm"
+              >
+                {editId === c.id ? (
+                  <>
+                    <input
+                      value={editName}
+                      onChange={(e) => setEditName(e.target.value)}
+                      className="flex-1 rounded border px-2 py-1 text-sm"
+                    />
+                    <Button
+                      size="sm"
+                      className="bg-amber-500 text-white hover:bg-amber-600 active:bg-amber-700"
+                      onClick={() => handleEditSave(c.id)}
+                    >
+                      Save
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => setEditId(null)}
+                    >
+                      Cancel
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-medium text-slate-700">
+                      {c.campaign_name}
+                    </p>
+                  </>
+                )}
+              </div>
+            ))}
+          </div>
         </div>
 
         {/* UPLOAD SECTION */}

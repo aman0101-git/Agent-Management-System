@@ -239,3 +239,180 @@ export const getCampaignDistributionSummary = async (req, res) => {
     res.status(500).json({ message: err.message });
   }
 };
+
+// Get IN_PROCESS (Rechurn) data for a campaign
+export const getRechurnData = async (req, res) => {
+  const campaignId = req.params.id;
+
+  try {
+    // ISSUE #6 FIX: Show only LATEST disposition per customer (no duplicates)
+    const [rechurnData] = await pool.query(
+      `SELECT
+        cd.id AS case_id,
+        cd.cust_name AS customer_name,
+        cd.mobileno AS phone,
+        cd.loan_agreement_no AS loan_id,
+        cd.insl_amt,
+        cd.pos,
+        cd.created_at AS allocation_date,
+
+        u.firstName AS last_agent_first_name,
+        u.lastName AS last_agent_last_name,
+
+        ad.disposition,
+        ad.remarks,
+        ad.created_at AS last_disposition_date,
+
+        cd.agent_id
+
+      FROM Coll_Data cd
+
+      INNER JOIN agent_cases ac
+        ON ac.coll_data_id = cd.id
+        AND ac.status = 'IN_PROGRESS'
+
+      /* 🔑 JOIN EXACTLY ONE ROW: the latest disposition */
+      INNER JOIN agent_dispositions ad
+        ON ad.id = (
+          SELECT ad2.id
+          FROM agent_dispositions ad2
+          WHERE ad2.agent_case_id = ac.id
+          ORDER BY ad2.created_at DESC, ad2.id DESC
+          LIMIT 1
+        )
+
+      LEFT JOIN users u
+        ON u.id = cd.agent_id
+
+      WHERE cd.campaign_id = ?
+        AND cd.is_active = TRUE
+
+      ORDER BY ad.created_at DESC;
+      `,
+      [campaignId]
+    );
+
+    // Get summary stats
+    const [[summary]] = await pool.query(
+      `SELECT COUNT(DISTINCT cd.id) AS total
+       FROM Coll_Data cd
+       LEFT JOIN agent_cases ac ON ac.coll_data_id = cd.id
+       WHERE cd.campaign_id = ?
+         AND ac.status = 'IN_PROGRESS'
+         AND cd.is_active = TRUE`,
+      [campaignId]
+    );
+
+    res.json({
+      campaignId,
+      totalRechurnRecords: summary.total,
+      rechurnData,
+    });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};
+
+// Rechurn (redistribute) IN_PROCESS data back to unassigned pool
+export const rechurnCampaignData = async (req, res) => {
+  const campaignId = req.params.id;
+  const { selectedIds } = req.body; // Optional: specific IDs to rechurn, or rechurn all
+
+  const conn = await pool.getConnection();
+
+  try {
+    await conn.beginTransaction();
+
+    // 1. Get IN_PROCESS data to rechurn
+    let query = `
+      SELECT cd.id FROM Coll_Data cd
+      LEFT JOIN agent_cases ac ON ac.coll_data_id = cd.id
+      WHERE cd.campaign_id = ?
+        AND ac.status = 'IN_PROGRESS'
+        AND cd.is_active = TRUE
+    `;
+
+    let params = [campaignId];
+
+    if (selectedIds && selectedIds.length > 0) {
+      query += ` AND cd.id IN (?)`;
+      params.push(selectedIds);
+    }
+
+    query += ` ORDER BY cd.id`;
+
+    const [dataToRechurn] = await conn.query(query, params);
+
+    if (dataToRechurn.length === 0) {
+      await conn.rollback();
+      return res.status(400).json({ message: "No data available to rechurn" });
+    }
+
+    const rechurnIds = dataToRechurn.map((row) => row.id);
+    let totalRechurned = 0;
+
+    // 2. Reset agent_id to NULL - put data back in the unassigned pool
+    // Agents will fetch these one-by-one when they request the next case
+    if (rechurnIds.length > 0) {
+      await conn.query(
+        `UPDATE Coll_Data SET agent_id = NULL WHERE id IN (?)`,
+        [rechurnIds]
+      );
+
+      // 3. Reset the agent_cases status back to NEW and inactive
+      // This allows the data to be picked up fresh on next request
+      await conn.query(
+        `UPDATE agent_cases
+         SET status = 'NEW', is_active = 0
+         WHERE coll_data_id IN (?)`,
+        [rechurnIds]
+      );
+
+      totalRechurned = rechurnIds.length;
+    }
+
+    await conn.commit();
+
+    res.json({
+      success: true,
+      campaignId,
+      rechurned: totalRechurned,
+      message: `${totalRechurned} records rechurned to agent pool. Agents will fetch them on-demand.`,
+    });
+  } catch (err) {
+    await conn.rollback();
+    res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
+  }
+};
+
+// Set campaign target amount
+export const setCampaignTarget = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { target_amount } = req.body;
+
+    if (!target_amount || target_amount <= 0) {
+      return res.status(400).json({ message: "Valid target amount required" });
+    }
+
+    const [campaign] = await pool.query(
+      "SELECT id FROM campaigns WHERE id = ? AND status = 'ACTIVE'",
+      [id]
+    );
+
+    if (!campaign.length) {
+      return res.status(404).json({ message: "Campaign not found or inactive" });
+    }
+
+    await pool.query(
+      "UPDATE campaigns SET target_amount = ? WHERE id = ?",
+      [parseFloat(target_amount), id]
+    );
+
+    res.json({ message: "Campaign target updated", campaign_id: id, target_amount: parseFloat(target_amount) });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+};

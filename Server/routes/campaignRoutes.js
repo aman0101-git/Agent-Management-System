@@ -6,10 +6,13 @@ import {
   listAllCampaigns,
   updateCampaignName,
   activateCampaign,
-  deactivateCampaign
+  deactivateCampaign,
+  distributeCampaignData,
+  getCampaignDistributionSummary,
+  getRechurnData,
+  rechurnCampaignData,
+  setCampaignTarget
 } from "../controllers/campaignController.js";
-import { distributeCampaignData } from "../controllers/campaignController.js";
-import { getCampaignDistributionSummary } from "../controllers/campaignController.js";
 
 const router = express.Router();
 
@@ -43,6 +46,30 @@ router.get(
   protect,
   allowRoles("ADMIN"),
   getCampaignDistributionSummary
+);
+
+// Get Rechurn data (IN_PROCESS)
+router.get(
+  "/:id/rechurn-data",
+  protect,
+  allowRoles("ADMIN"),
+  getRechurnData
+);
+
+// Rechurn (redistribute IN_PROCESS data)
+router.post(
+  "/:id/rechurn",
+  protect,
+  allowRoles("ADMIN"),
+  rechurnCampaignData
+);
+
+// Set campaign target amount
+router.post(
+  "/:id/set-target",
+  protect,
+  allowRoles("ADMIN"),
+  setCampaignTarget
 );
 
 export default router;

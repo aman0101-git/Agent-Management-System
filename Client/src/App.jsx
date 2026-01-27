@@ -1,12 +1,16 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/auth/Login';
 import AdminDashboard from "./pages/dashboard/AdminDashboard";
+import FileExports from "./pages/dashboard/FileExports";
 import AgentDashboard from "./pages/dashboard/AgentDashboard";
+import CustomerSearch from "./pages/dashboard/CustomerSearch";
+import PerformanceAnalytics from "./pages/dashboard/PerformanceAnalytics";
 import ProtectedRoute from "./components/ProtectedRoute";
 import CreateUser from "./pages/admin/CreateUser";
 import UploadData from "./pages/admin/UploadData";
 import ManageCampaigns from "./pages/admin/ManageCampaigns";
 import CampaignAgents from "./pages/admin/CampaignAgents";
+import MonitoringAnalytics from "./pages/admin/MonitoringAnalytics";
 
 function App() {
   return (
@@ -42,6 +46,24 @@ function App() {
       />
 
       <Route
+        path="/agent/search"
+        element={
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <CustomerSearch />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
+        path="/agent/analytics"
+        element={
+          <ProtectedRoute allowedRoles={["AGENT"]}>
+            <PerformanceAnalytics />
+          </ProtectedRoute>
+        }
+      />
+
+      <Route
         path="/admin/upload-data"
         element={
           <ProtectedRoute allowedRoles={["ADMIN"]}>
@@ -68,6 +90,22 @@ function App() {
         }
       />
 
+      <Route
+        path="/admin/file-exports"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <FileExports />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/monitoring-analytics"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <MonitoringAnalytics />
+          </ProtectedRoute>
+        }
+      />
 
     </Routes>
   );

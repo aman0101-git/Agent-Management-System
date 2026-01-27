@@ -1,105 +1,347 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
+import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { fetchAgentLoans } from "@/api/agentApi";
+import { fetchAgentCases, fetchNextCase } from "@/api/agentApi";
+import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
 
 const AgentDashboard = () => {
+    const [fetchingNext, setFetchingNext] = useState(false);
   const { user, token, logout } = useAuth();
-  const [loans, setLoans] = useState([]);
+
+  const [cases, setCases] = useState([]);
+  const [filteredCases, setFilteredCases] = useState([]);
+  const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const [selectedCaseId, setSelectedCaseId] = useState(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  // unused expanded row state removed to satisfy lint
+
   useEffect(() => {
-    const loadLoans = async () => {
+    const loadCases = async () => {
       try {
-        const res = await fetchAgentLoans(token);
-        setLoans(res.data || []);
-      } catch (err) {
-        console.error("Failed to fetch agent loans", err);
+        const res = await fetchAgentCases(token);
+        const data = res.data || [];
+        setCases(data);
+        setFilteredCases(data);
+
+        if (!data.length) {
+          try {
+            const nextRes = await fetchNextCase(token);
+            if (nextRes.status === 200 && nextRes.data?.caseId) {
+              const r2 = await fetchAgentCases(token);
+              const newData = r2.data || [];
+              setCases(newData);
+              setFilteredCases(newData);
+              setSelectedCaseId(nextRes.data.caseId);
+              setDrawerOpen(true);
+            }
+          } catch (e) {
+            console.debug("No next case allocated or error", e);
+          }
+        }
       } finally {
         setLoading(false);
       }
     };
-
-    loadLoans();
+    loadCases();
+    window.__reloadAgentCases = loadCases;
   }, [token]);
+
+  useEffect(() => {
+    if (!search) {
+      setFilteredCases(cases);
+    } else {
+      setFilteredCases(
+        cases.filter(
+          (c) =>
+            String(c.phone || "").includes(search) ||
+            String(c.customer_name || "")
+              .toLowerCase()
+              .includes(search.toLowerCase()) ||
+            String(c.loan_id || "").includes(search)
+        )
+      );
+    }
+  }, [search, cases]);
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "-";
+    return new Date(dateStr).toLocaleDateString("en-IN", {
+      day: "2-digit",
+      month: "2-digit",
+      year: "numeric",
+    });
+  };
+
+  const formatTime = (timeStr) => {
+    if (!timeStr) return "-";
+    return timeStr.substring(0, 5);
+  };
+
+  const getStatusBadge = (status) => {
+    const baseClass = "px-2 py-1 rounded-full text-xs font-medium";
+    if (status === "NEW") {
+      return `${baseClass} bg-blue-100 text-blue-700`;
+    } else if (status === "DONE") {
+      return `${baseClass} bg-green-100 text-green-700`;
+    }
+    return `${baseClass} bg-slate-100 text-slate-700`;
+  };
+
+  /* =====================================================
+     FOLLOW-UP ROW COLOR LOGIC
+     ===================================================== */
+  const getFollowUpRowColor = (caseItem) => {
+    if (caseItem.status !== "FOLLOW_UP" || !caseItem.follow_up_date) {
+      return "";
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const followUpDate = new Date(caseItem.follow_up_date);
+    followUpDate.setHours(0, 0, 0, 0);
+
+    if (followUpDate < today) {
+      return "bg-red-100 hover:bg-red-200";
+    }
+
+    if (followUpDate.getTime() === today.getTime()) {
+      return "bg-yellow-100 hover:bg-yellow-200";
+    }
+
+    return "";
+  };
+
+  /* =====================================================
+     FOLLOW-UP PRIORITY SORTING (ADDED)
+     ===================================================== */
+  const getFollowUpPriority = (caseItem) => {
+    if (caseItem.status !== "FOLLOW_UP" || !caseItem.follow_up_date) {
+      return 3; // non-follow-up
+    }
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const followUpDate = new Date(caseItem.follow_up_date);
+    followUpDate.setHours(0, 0, 0, 0);
+
+    if (followUpDate < today) return 0; // red
+    if (followUpDate.getTime() === today.getTime()) return 1; // yellow
+    return 2; // future
+  };
+
+  /* =====================================================
+     SORTED CASES (ADDED)
+     ===================================================== */
+  const sortedCases = [...filteredCases].sort((a, b) => {
+    const pA = getFollowUpPriority(a);
+    const pB = getFollowUpPriority(b);
+
+    if (pA !== pB) return pA - pB;
+
+    if (a.status === "FOLLOW_UP" && b.status === "FOLLOW_UP") {
+      const dateA = new Date(
+        `${a.follow_up_date} ${a.follow_up_time || "00:00"}`
+      );
+      const dateB = new Date(
+        `${b.follow_up_date} ${b.follow_up_time || "00:00"}`
+      );
+      return dateA - dateB;
+    }
+
+    return 0;
+  });
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200">
       {/* Header */}
       <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
-        <div className="mx-auto max-w-6xl px-6 py-4 flex items-center justify-between">
+        <div className="mx-auto max-w-7xl px-2 sm:px-6 py-4 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
           <div>
-            <h1 className="text-xl font-semibold text-slate-900">
-              Agent Dashboard
+            <h1 className="text-lg sm:text-xl font-semibold text-slate-900">
+              Welcome, {user?.firstName} {user?.lastName}
             </h1>
-            <p className="text-sm text-slate-500">
-              Daily collection & calling workspace
+            <p className="text-xs sm:text-sm text-slate-500">
+              {filteredCases.length} allocated accounts
             </p>
           </div>
 
           <Button
-            variant="destructive"
             onClick={logout}
-            className="bg-rose-600 text-white shadow-md hover:bg-rose-700"
+            className="bg-rose-600 text-white hover:bg-rose-700 shadow-md w-full sm:w-auto"
           >
             Logout
           </Button>
         </div>
       </header>
 
-      {/* Main */}
-      <main className="mx-auto max-w-6xl px-6 py-8">
-        <div className="rounded-2xl border bg-white shadow">
-          <div className="border-b p-4">
-            <h2 className="text-lg font-semibold">
-              Welcome, {user.firstName}
-            </h2>
-            <p className="text-sm text-slate-500">
-              Allocated Accounts
-            </p>
-          </div>
-
-          {/* Content */}
-          <div className="p-4 overflow-x-auto">
-            {loading && (
-              <p className="text-sm text-slate-500">Loading data...</p>
-            )}
-
-            {!loading && loans.length === 0 && (
-              <p className="text-sm text-slate-500">
-                No accounts allocated yet.
-              </p>
-            )}
-
-            {!loading && loans.length > 0 && (
-              <table className="w-full text-sm border">
-                <thead className="bg-slate-100">
-                  <tr>
-                    <th className="p-2 border">Customer</th>
-                    <th className="p-2 border">Mobile</th>
-                    <th className="p-2 border">Loan ID</th>
-                    <th className="p-2 border">Outstanding</th>
-                    <th className="p-2 border">DPD</th>
-                    <th className="p-2 border">State</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {loans.map((loan) => (
-                    <tr key={loan.id} className="hover:bg-slate-50">
-                      <td className="p-2 border">{loan.cust_name}</td>
-                      <td className="p-2 border">{loan.mobileno}</td>
-                      <td className="p-2 border">{loan.appl_id}</td>
-                      <td className="p-2 border">{loan.amt_outst}</td>
-                      <td className="p-2 border">{loan.dpd}</td>
-                      <td className="p-2 border">{loan.state}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+      {/* Navigation Tabs */}
+      <nav className="border-b bg-white sticky top-16 z-10">
+        <div className="mx-auto max-w-7xl px-2 sm:px-6 flex flex-col sm:flex-row gap-2 sm:gap-8">
+          <Link
+            to="/agent/dashboard"
+            className="py-3 px-1 text-xs sm:text-sm font-medium border-b-2 border-blue-600 text-blue-600"
+          >
+            My Allocations
+          </Link>
+          <Link
+            to="/agent/search"
+            className="py-3 px-1 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
+          >
+            Customer Search
+          </Link>
+          <Link
+            to="/agent/analytics"
+            className="py-3 px-1 text-xs sm:text-sm font-medium border-b-2 border-transparent text-slate-600 hover:border-slate-300 hover:text-slate-900"
+          >
+            Performance Analytics
+          </Link>
         </div>
+      </nav>
+
+      {/* Main */}
+      <main className="mx-auto max-w-7xl px-2 sm:px-6 py-4 sm:py-8">
+
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between mb-6 gap-2">
+          <input
+            type="text"
+            placeholder="Search by name, phone, or loan ID"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-full rounded-xl border border-slate-300 bg-white px-4 py-3 text-xs sm:text-sm"
+          />
+          <button
+            className="sm:ml-4 mt-2 sm:mt-0 px-2 py-1 rounded bg-indigo-600 text-white font-medium shadow hover:bg-indigo-700 transition disabled:opacity-60 text-xs"
+            style={{ minWidth: 70 }}
+            disabled={fetchingNext}
+            onClick={async () => {
+              setFetchingNext(true);
+              try {
+                const nextRes = await fetchNextCase(token);
+                if (nextRes.status === 200 && nextRes.data?.caseId) {
+                  if (typeof window.__reloadAgentCases === "function") {
+                    await window.__reloadAgentCases();
+                  }
+                  setSelectedCaseId(nextRes.data.caseId);
+                  setDrawerOpen(true);
+                } else if (nextRes.status === 204) {
+                  alert("No new customers available.");
+                } else {
+                  alert("Could not fetch next customer.");
+                }
+              } catch (e) {
+                alert("Error fetching next customer.");
+              } finally {
+                setFetchingNext(false);
+              }
+            }}
+          >
+            {fetchingNext ? "Loading..." : "New Customer"}
+          </button>
+        </div>
+
+        {!loading && sortedCases.length > 0 && (
+          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="min-w-[900px] grid grid-cols-12 gap-4 bg-slate-50 px-4 py-3 border-b border-slate-200 text-xs sm:text-sm font-semibold">
+              <div className="col-span-2">Name</div>
+              <div className="col-span-1">Phone</div>
+              <div className="col-span-2">Loan ID</div>
+              <div className="col-span-1">Status</div>
+              <div className="col-span-1">Alloc. Date</div>
+              <div className="col-span-1">Inst. Amt</div>
+              <div className="col-span-1">POS</div>
+              <div className="col-span-1">BOM_BKT</div>
+              <div className="col-span-1">Follow-up</div>
+              <div className="col-span-1 text-right">Action</div>
+            </div>
+
+            {sortedCases.map((caseItem) => (
+              <div key={caseItem.case_id}>
+                <button
+                  className={`w-full min-w-[900px] grid grid-cols-12 gap-4 px-4 py-3 border-b border-slate-100 text-xs sm:text-sm text-left transition
+                    ${getFollowUpRowColor(caseItem)}`}
+                >
+                  <div className="col-span-2 font-medium truncate">
+                    {caseItem.customer_name || "-"}
+                  </div>
+                  <div className="col-span-1">{caseItem.phone || "-"}</div>
+                  <div className="col-span-2">{caseItem.loan_id || "-"}</div>
+                  <div className="col-span-1">
+                    <span className={getStatusBadge(caseItem.status)}>
+                      {caseItem.status}
+                    </span>
+                  </div>
+                  <div className="col-span-1 text-xs">
+                    {formatDate(caseItem.allocation_date)}
+                  </div>
+                  <div className="col-span-1 text-xs">
+                    {caseItem.insl_amt || "-"}
+                  </div>
+                  <div className="col-span-1 text-xs">
+                    {caseItem.pos || "-"}
+                  </div>
+                  <div className="col-span-1 text-xs">
+                    {caseItem.bom_bucket || "-"}
+                  </div>
+                  <div className="col-span-1 text-xs">
+                    {caseItem.follow_up_date
+                      ? `${formatDate(
+                          caseItem.follow_up_date
+                        )} ${formatTime(caseItem.follow_up_time)}`
+                      : "-"}
+                  </div>
+                  <div className="col-span-1 flex justify-end">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedCaseId(caseItem.case_id);
+                        setDrawerOpen(true);
+                      }}
+                      className="text-indigo-600 font-medium"
+                    >
+                      View
+                    </button>
+                  </div>
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
       </main>
+
+      <CustomerDetailDrawer
+        caseId={selectedCaseId}
+        isOpen={drawerOpen}
+        onClose={() => {
+          setDrawerOpen(false);
+          setSelectedCaseId(null);
+        }}
+        onDispositionSubmitted={async (res) => {
+          if (typeof window.__reloadAgentCases === "function") {
+            await window.__reloadAgentCases();
+          }
+          // If status changed and next customer should be allocated, open next customer automatically
+          if (res && (res.allocateNext || res.allocateNextOnStatusChange)) {
+            try {
+              const nextRes = await fetchNextCase(token);
+              if (nextRes.status === 200 && nextRes.data?.caseId) {
+                if (typeof window.__reloadAgentCases === "function") {
+                  await window.__reloadAgentCases();
+                }
+                setSelectedCaseId(nextRes.data.caseId);
+                setDrawerOpen(true);
+                return;
+              }
+            } catch {}
+          }
+          setDrawerOpen(false);
+          setSelectedCaseId(null);
+        }}
+      />
     </div>
   );
 };
