@@ -34,8 +34,14 @@ const __dirname = path.dirname(__filename);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
+app.use(express.static(path.join(__dirname, 'dist')));
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://192.168.1.14/Collections/Client/dist/'
+];
 app.use(cors({
-  origin: true,
+  origin: allowedOrigins,
   credentials: true,
 }));
 
@@ -49,7 +55,7 @@ app.use("/api/data", dataRoutes);
 app.use("/api/campaigns", campaignRoutes);
 app.use("/api/campaigns", campaignAgentRoutes);
 
-// ✅ Frontend fallback LAST
+// Frontend fallback LAST
 app.get(/^(?!\/api).*/, (req, res) => {
   res.sendFile(path.join(__dirname, 'dist', 'index.html'));
 });

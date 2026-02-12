@@ -9,7 +9,7 @@ const pool = mysql.createPool({
   waitForConnections: true,
   connectionLimit: 10,        // enough for 50 agents
   queueLimit: 0,              // unlimited queue
-  connectTimeout: 10000,      // 10 seconds
+  connectTimeout: 10000,      // 10 secondsgit 
 });
 
 // Optional but strongly recommended
