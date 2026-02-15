@@ -139,23 +139,37 @@ const CustomerDetailDrawer = ({
     }
   }, [isOpen, caseId]);
 
-  // Start a visit when drawer opens (agent clicks New / opens drawer)
+  // Start a visit when drawer opens, End visit when drawer closes/unmounts
   useEffect(() => {
-    let mounted = true;
-    const startVisit = async () => {
+    let activeVisitId = null;
+
+    const manageVisit = async () => {
+      // Only start if drawer is open and we have a valid ID
       if (!isOpen || !caseId) return;
+
       try {
         const res = await startCustomerVisit(caseId, token);
-        if (mounted && res?.visit_id) setVisitId(res.visit_id);
+        if (res?.visit_id) {
+          setVisitId(res.visit_id);
+          activeVisitId = res.visit_id; // Store ID locally for cleanup closure
+        }
       } catch (err) {
         console.error('Failed to start visit', err);
       }
     };
 
-    startVisit();
+    manageVisit();
 
-    return () => { mounted = false; };
-  }, [isOpen, caseId, token]);
+    // CLEANUP FUNCTION: Runs automatically when drawer closes or component unmounts
+    return () => {
+      if (activeVisitId) {
+        // Attempt to close the visit
+        endCustomerVisit(activeVisitId, token).catch((err) => 
+          console.error('Failed to auto-close visit on exit', err)
+        );
+      }
+    };
+  }, [isOpen, caseId, token]); // Dependencies ensure this runs correctly on open/close
 
   const loadCaseDetails = async () => {
     try {

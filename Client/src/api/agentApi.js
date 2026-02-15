@@ -1,3 +1,8 @@
+// src/api/agentApi.js
+import axios from "axios";
+
+const API_BASE = "http://localhost:5000/api/agent";
+
 // Fetch ONCE_PTP/ONCE_PRT constraints for a customer
 export const fetchOnceConstraints = async (collDataId, token) => {
   const res = await axios.get(
@@ -8,10 +13,6 @@ export const fetchOnceConstraints = async (collDataId, token) => {
   );
   return res.data;
 };
-// src/api/agentApi.js
-import axios from "axios";
-
-const API_BASE = "http://localhost:5000/api/agent";
 
 // Fetch allocated cases for agent
 export const fetchAgentCases = async (token) => {
