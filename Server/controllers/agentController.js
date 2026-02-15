@@ -655,7 +655,7 @@ export const searchCustomers = async (req, res) => {
             await pool.query(
               `
               INSERT INTO agent_cases (agent_id, coll_data_id, status) 
-              VALUES (?, ?, 'NEW', 1)
+              VALUES (?, ?, 'NEW')
               `,
               [agentId, customer.id]
             );

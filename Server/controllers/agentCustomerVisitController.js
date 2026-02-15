@@ -9,12 +9,26 @@ export const startCustomerVisit = async (req, res) => {
     if (!agent_id) return res.status(401).json({ message: "Unauthorized" });
     if (!customer_id) return res.status(400).json({ message: "customer_id is required" });
 
+    // 1. Check if there is ALREADY an open visit for this agent & customer
+    const [existing] = await pool.query(
+      `SELECT id FROM agent_customer_visits 
+       WHERE agent_id = ? AND customer_id = ? AND exit_time IS NULL
+       LIMIT 1`,
+      [agent_id, customer_id]
+    );
+
+    // 2. If open visit exists, return it (Don't create duplicate)
+    if (existing.length > 0) {
+      return res.json({ visit_id: existing[0].id, status: 'resumed' });
+    }
+
+    // 3. If no open visit, create new one
     const [result] = await pool.query(
       `INSERT INTO agent_customer_visits (agent_id, customer_id, entry_time) VALUES (?, ?, NOW())`,
       [agent_id, customer_id]
     );
 
-    return res.json({ visit_id: result.insertId });
+    return res.json({ visit_id: result.insertId, status: 'started' });
   } catch (err) {
     console.error("startCustomerVisit error:", err);
     res.status(500).json({ message: "Failed to start visit" });
@@ -28,14 +42,11 @@ export const endCustomerVisit = async (req, res) => {
 
     if (!visit_id) return res.status(400).json({ message: "visit_id is required" });
 
+    // Update exit time
     const [result] = await pool.query(
-      `UPDATE agent_customer_visits SET exit_time = NOW() WHERE id = ? AND exit_time IS NULL`,
+      `UPDATE agent_customer_visits SET exit_time = NOW() WHERE id = ?`,
       [visit_id]
     );
-
-    if (result.affectedRows === 0) {
-      return res.status(400).json({ message: "Visit already closed or not found" });
-    }
 
     return res.json({ success: true });
   } catch (err) {
@@ -60,6 +71,7 @@ export const getCustomerVisitHistory = async (req, res) => {
       LEFT JOIN users u ON u.id = acv.agent_id
       WHERE acv.customer_id = ? 
       ORDER BY acv.entry_time DESC
+      LIMIT 50
       `,
       [customer_id]
     );
