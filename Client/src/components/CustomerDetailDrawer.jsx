@@ -139,24 +139,49 @@ const CustomerDetailDrawer = ({
     }
   }, [isOpen, caseId]);
 
-  // Start a visit when drawer opens (agent clicks New / opens drawer)
+  // FIX: Concurrency-Safe Visit Tracking
   useEffect(() => {
-    let mounted = true;
-    const startVisit = async () => {
+    let activeVisitId = null;
+    let isMounted = true; // 1️⃣ Track if component is alive
+
+    const manageVisit = async () => {
+      // Only start if drawer is open and we have a valid ID
       if (!isOpen || !caseId) return;
+
       try {
         const res = await startCustomerVisit(caseId, token);
-        if (mounted && res?.visit_id) setVisitId(res.visit_id);
+        
+        if (res?.visit_id) {
+          // 2️⃣ Check if we are still mounted before setting state
+          if (isMounted) {
+            setVisitId(res.visit_id);
+            activeVisitId = res.visit_id;
+          } else {
+            // 3️⃣ SAFETY NET: Component died while request was in flight.
+            // Immediately close this "ghost" visit so it doesn't get stuck as "In Progress".
+            endCustomerVisit(res.visit_id, token).catch((err) =>
+              console.error("Closed orphaned visit", err)
+            );
+          }
+        }
       } catch (err) {
         console.error('Failed to start visit', err);
       }
     };
 
-    startVisit();
+    manageVisit();
 
-    return () => { mounted = false; };
+    // CLEANUP: Runs when drawer closes
+    return () => {
+      isMounted = false; // Mark component as dead
+      if (activeVisitId) {
+        endCustomerVisit(activeVisitId, token).catch((err) => 
+          console.error('Failed to auto-close visit on exit', err)
+        );
+      }
+    };
   }, [isOpen, caseId, token]);
-
+  
   const loadCaseDetails = async () => {
     try {
       setLoading(true);
