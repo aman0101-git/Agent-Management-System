@@ -80,6 +80,7 @@ export const getMonitoringAnalytics = async (req, res) => {
 
     /* ===============================
        SECTION A: CALLS + PTP
+       (Counts all interactions, no "Latest" logic needed for raw activity)
        =============================== */
     const [[overview]] = await pool.query(
       `
@@ -102,23 +103,37 @@ export const getMonitoringAnalytics = async (req, res) => {
 
     /* ===============================
        SECTION B: COLLECTION BREAKDOWN
+       (Uses "Latest Case" Logic to prevent double counting)
        =============================== */
     const [breakdownRows] = await pool.query(
       `
       SELECT
-        ad.disposition,
-        COUNT(*) AS customer_count,
-        COALESCE(SUM(ad.promise_amount), 0) AS total_amount
-      FROM agent_dispositions ad
-      JOIN agent_cases ac ON ac.id = ad.agent_case_id
-      JOIN users u ON u.id = ad.agent_id
-      LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-      ${whereClause}
-        AND ad.created_at BETWEEN ? AND ?
-        AND ad.disposition IN ('PIF','SIF','FCL','PRT')
-      GROUP BY ad.disposition
+        disposition,
+        COUNT(DISTINCT agent_case_id) AS customer_count,
+        COALESCE(SUM(promise_amount), 0) AS total_amount
+      FROM (
+        SELECT ad.*
+        FROM agent_dispositions ad
+        JOIN users u ON u.id = ad.agent_id
+        LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+        JOIN (
+           -- Get the latest disposition per case within the timeframe
+           SELECT agent_case_id, MAX(created_at) AS latest_time
+           FROM agent_dispositions ad
+           JOIN users u ON u.id = ad.agent_id
+           LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+           ${whereClause}
+             AND ad.created_at BETWEEN ? AND ?
+           GROUP BY agent_case_id
+        ) latest
+          ON latest.agent_case_id = ad.agent_case_id
+          AND latest.latest_time = ad.created_at
+        ${whereClause} 
+      ) latest_cases
+      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+      GROUP BY disposition
       `,
-      [...params, startDateStr, endDateStr]
+      [...params, startDateStr, endDateStr, ...params] // Params repeated for inner subquery
     );
 
     const breakdown = {
@@ -136,43 +151,70 @@ export const getMonitoringAnalytics = async (req, res) => {
     });
 
     /* ===============================
-       SECTION C: TOTAL COLLECTION
+       SECTION C: TOTAL COLLECTION SUMMARY
+       (Uses "Latest Case" Logic)
        =============================== */
     const [[summary]] = await pool.query(
       `
       SELECT
         COUNT(*) AS total_collected_count,
-        COALESCE(SUM(ad.promise_amount), 0) AS total_collected_amount
-      FROM agent_dispositions ad
-      JOIN agent_cases ac ON ac.id = ad.agent_case_id
-      JOIN users u ON u.id = ad.agent_id
-      LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-      ${whereClause}
-        AND ad.created_at BETWEEN ? AND ?
-        AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
+      FROM (
+        SELECT ad.*
+        FROM agent_dispositions ad
+        JOIN users u ON u.id = ad.agent_id
+        LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+        JOIN (
+           SELECT agent_case_id, MAX(created_at) AS latest_time
+           FROM agent_dispositions ad
+           JOIN users u ON u.id = ad.agent_id
+           LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+           ${whereClause}
+             AND ad.created_at BETWEEN ? AND ?
+           GROUP BY agent_case_id
+        ) latest
+          ON latest.agent_case_id = ad.agent_case_id
+          AND latest.latest_time = ad.created_at
+        ${whereClause}
+      ) latest_cases
+      WHERE disposition IN ('PIF','SIF','FCL','PRT')
       `,
-      [...params, startDateStr, endDateStr]
+      [...params, startDateStr, endDateStr, ...params]
     );
 
     /* ===============================
        SECTION D: MONTHLY SUMMARY
+       (Uses "Latest Case" Logic + Correct Filters)
        =============================== */
     const [[monthlyActual]] = await pool.query(
       `
       SELECT
         COUNT(*) AS total_collected_count,
-        COALESCE(SUM(ad.promise_amount), 0) AS total_collected_amount
-      FROM agent_dispositions ad
-      JOIN agent_cases ac ON ac.id = ad.agent_case_id
-      JOIN users u ON u.id = ad.agent_id
-      LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-      ${whereClause}
-        AND ad.created_at BETWEEN ? AND ?
-        AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
+      FROM (
+        SELECT ad.*
+        FROM agent_dispositions ad
+        JOIN users u ON u.id = ad.agent_id
+        LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+        JOIN (
+           SELECT agent_case_id, MAX(created_at) AS latest_time
+           FROM agent_dispositions ad
+           JOIN users u ON u.id = ad.agent_id
+           LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+           ${whereClause}
+             AND ad.created_at BETWEEN ? AND ?
+           GROUP BY agent_case_id
+        ) latest
+          ON latest.agent_case_id = ad.agent_case_id
+          AND latest.latest_time = ad.created_at
+        ${whereClause}
+      ) latest_cases
+      WHERE disposition IN ('PIF','SIF','FCL','PRT')
       `,
-      [...params, monthStartStr, monthEndStr]
+      [...params, monthStartStr, monthEndStr, ...params]
     );
 
+    // ✅ FIXED: Now respects the Agent/Campaign filters
     const [[monthlyExpected]] = await pool.query(
       `
       SELECT
@@ -181,32 +223,54 @@ export const getMonitoringAnalytics = async (req, res) => {
           -
           COALESCE(SUM(CASE WHEN disposition='RTP' THEN promise_amount ELSE 0 END), 0)
         ) AS expected_amount
-      FROM agent_dispositions
-      WHERE created_at BETWEEN ? AND ?
+      FROM agent_dispositions ad
+      JOIN users u ON u.id = ad.agent_id
+      LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+      ${whereClause}
+        AND ad.created_at BETWEEN ? AND ?
       `,
-      [monthStartStr, monthEndStr]
+      [...params, monthStartStr, monthEndStr]
     );
 
     /* ===============================
-       SECTION E: MONTHLY TARGET
+       SECTION E: TARGET CALCULATION
+       (Smart switch between Agent Targets and Campaign Targets)
        =============================== */
-
     let targetAmount = 0;
-    if (campaign_id !== "ALL") {
-      // Support multi-select: sum target_amount for all selected campaigns
+
+    // Case 1: Specific Agents Selected -> Sum AGENT TARGETS
+    if (agent_id !== "ALL") {
+      const agentIds = agent_id.split(",").map((id) => id.trim());
+      const placeholders = agentIds.map(() => "?").join(",");
+      
+      const [[row]] = await pool.query(
+        `SELECT SUM(target_amount) AS target_amount 
+         FROM agent_targets 
+         WHERE agent_id IN (${placeholders}) 
+           AND month = ?`,
+        [...agentIds, currentMonth]
+      );
+      targetAmount = row?.target_amount || 0;
+    } 
+    // Case 2: Specific Campaigns Selected -> Sum CAMPAIGN TARGETS
+    else if (campaign_id !== "ALL") {
       const campaignIds = campaign_id.split(",").map((id) => id.trim());
       const placeholders = campaignIds.map(() => "?").join(",");
-        const [[row]] = await pool.query(
-          `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE id IN (${placeholders}) AND status = 'ACTIVE'`,
-          campaignIds
-        );
-        targetAmount = row?.target_amount || 0;
-    } else {
-      // If ALL, sum all campaign targets
-        const [[row]] = await pool.query(
-          `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE status = 'ACTIVE'`
-        );
-        targetAmount = row?.target_amount || 0;
+      
+      const [[row]] = await pool.query(
+        `SELECT SUM(target_amount) AS target_amount 
+         FROM campaigns 
+         WHERE id IN (${placeholders}) AND status = 'ACTIVE'`,
+        campaignIds
+      );
+      targetAmount = row?.target_amount || 0;
+    } 
+    // Case 3: ALL (Overview) -> Sum ALL CAMPAIGN TARGETS
+    else {
+      const [[row]] = await pool.query(
+        `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE status = 'ACTIVE'`
+      );
+      targetAmount = row?.target_amount || 0;
     }
 
     const achievementPercent =
