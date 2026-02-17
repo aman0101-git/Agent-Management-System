@@ -3,7 +3,15 @@ import jwt from 'jsonwebtoken';
 import pool from '../config/mysql.js';
 import User from '../models/userModel.js';
 
-const JWT_SECRET = process.env.JWT_ACCESS_SECRET || process.env.JWT_SECRET || 'fallback_secret_key';
+// SECURITY CHECK: Fail fast if no secret is provided in .env
+if (!process.env.JWT_SECRET && !process.env.JWT_ACCESS_SECRET) {
+  console.error("FATAL ERROR: JWT_SECRET is missing in environment variables.");
+  process.exit(1); // Stop server to prevent insecure startup
+}
+
+const JWT_SECRET = process.env.JWT_SECRET || process.env.JWT_ACCESS_SECRET;
+const EXPIRY_DURATION = '24h'; 
+const COOKIE_MAX_AGE = 24 * 60 * 60 * 1000; // 24 Hours in milliseconds
 
 // REGISTER
 export const register = async (req, res) => {
@@ -37,6 +45,7 @@ export const register = async (req, res) => {
 
     res.status(201).json({ success: true, message: 'Registration successful' });
   } catch (err) {
+    console.error("Register Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
@@ -46,7 +55,6 @@ export const login = async (req, res) => {
   try {
     const { username, password } = req.body;
 
-    // Validate inputs
     if (!username || !password) {
       return res.status(400).json({ success: false, message: 'Username and password required' });
     }
@@ -57,6 +65,11 @@ export const login = async (req, res) => {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
+    // Check Active Status (CRITICAL for production: Block fired agents)
+    if (!user.isActive) {
+      return res.status(403).json({ success: false, message: 'Account is inactive. Contact Admin.' });
+    }
+
     // Validate password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
@@ -64,20 +77,22 @@ export const login = async (req, res) => {
     }
 
     // Generate token
-   const token = jwt.sign(
-     { id: user.id, role: user.role, expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() }, 
-     JWT_SECRET, 
-     { expiresIn: '24h' }
-   );
+    const token = jwt.sign(
+      { id: user.id, role: user.role }, 
+      JWT_SECRET, 
+      { expiresIn: EXPIRY_DURATION }
+    );
 
-    // Role-based redirect path for frontend
+    const expiresAt = new Date(Date.now() + COOKIE_MAX_AGE).toISOString();
+
+    // Role-based redirect path
     const redirectTo = user.role === 'ADMIN' ? '/admin/dashboard' : '/agent/dashboard';
 
     res.status(200).json({
       success: true,
       token,
       redirectTo,
-     expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+      expiresAt,
       user: {
         id: user.id,
         firstName: user.firstName,
@@ -87,13 +102,12 @@ export const login = async (req, res) => {
       },
     });
   } catch (err) {
+    console.error("Login Error:", err);
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
 // LOGOUT
 export const logout = (req, res) => {
-  // Token is removed on client-side via localStorage.removeItem
-  // This endpoint confirms logout on server-side if needed
   res.status(200).json({ success: true, message: 'Logged out successfully' });
 };

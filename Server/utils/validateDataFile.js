@@ -85,11 +85,15 @@ const DATE_FIELDS = [
 export const convertExcelDate = (value) => {
   if (!value) return null;
 
-  // Reject non-date text explicitly
+  // FIX: Handle JavaScript Date objects (created when cellDates: true is used)
+  if (value instanceof Date) {
+    if (isNaN(value.getTime())) return null; // Invalid date check
+    return value.toISOString().slice(0, 10); // Return YYYY-MM-DD
+  }
+
+  // Handle Strings
   if (typeof value === "string") {
     const clean = value.trim().toUpperCase();
-
-    // Known non-date business terms
     if (
       clean === "NA" ||
       clean === "N/A" ||
@@ -99,21 +103,20 @@ export const convertExcelDate = (value) => {
     ) {
       return null;
     }
-
-    // ISO date already
+    // If it's already a date string YYYY-MM-DD
     if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
       return clean;
     }
-
-    // Any other string → reject
     return null;
   }
 
-  // Excel serial number
+  // Handle Excel Serial Numbers
   const num = Number(value);
   if (!isNaN(num) && num > 0) {
     const excelEpoch = new Date(1899, 11, 30);
     const date = new Date(excelEpoch.getTime() + num * 86400000);
+    // Safety check for overflow dates
+    if (isNaN(date.getTime())) return null;
     return date.toISOString().slice(0, 10);
   }
 
