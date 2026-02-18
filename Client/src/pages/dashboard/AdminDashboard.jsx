@@ -1,35 +1,14 @@
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import FileExports from "./FileExports";
+import AdminNavbar from "../../components/AdminNavbar";
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200">
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b bg-white/80 backdrop-blur">
-        <div className="mx-auto max-w-7xl px-6 py-4 flex items-center justify-between">
-          <div>
-            <h1 className="text-xl font-semibold text-slate-900">
-              Welcome, {user?.firstName} {user?.lastName}
-            </h1>
-            <p className="text-sm text-slate-500">
-              Control & monitor system operations
-            </p>
-          </div>
-
-          <Button
-            variant="destructive"
-            onClick={logout}
-            className="bg-rose-600 text-white shadow-md hover:bg-rose-700 hover:shadow-lg active:bg-rose-800 active:scale-[0.97] transition-all"
-          >
-            Logout
-          </Button>
-        </div>
-      </header>
-
+      <AdminNavbar/>
       {/* Main */}
       <main className="mx-auto max-w-7xl px-6 py-10">
         {/* Action Cards */}

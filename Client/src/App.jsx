@@ -1,7 +1,7 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import Login from './pages/auth/Login';
 import AdminDashboard from "./pages/dashboard/AdminDashboard";
-import FileExports from "./pages/dashboard/FileExports";
+import FileExports from "./pages/admin/FileExports";
 import AgentDashboard from "./pages/dashboard/AgentDashboard";
 import CustomerSearch from "./pages/dashboard/CustomerSearch";
 import PerformanceAnalytics from "./pages/dashboard/PerformanceAnalytics";

@@ -4,6 +4,20 @@ import axios from "axios";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { 
+  UserPlus, 
+  User, 
+  Lock, 
+  Eye, 
+  EyeOff, 
+  Shield, 
+  CheckCircle2, 
+  AlertCircle,
+  AtSign
+} from "lucide-react";
+import AdminNavbar from "../../components/AdminNavbar";
 
 const CreateUser = () => {
   const { token } = useAuth();
@@ -21,6 +35,11 @@ const CreateUser = () => {
 
   const handleChange = (e) => {
     setForm({ ...form, [e.target.name]: e.target.value });
+  };
+
+  // Dedicated handler for Shadcn Select component
+  const handleRoleChange = (value) => {
+    setForm({ ...form, role: value });
   };
 
   const handleSubmit = async (e) => {
@@ -54,103 +73,148 @@ const CreateUser = () => {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-100 via-white to-slate-200">
-      <div className="mx-auto max-w-xl px-6 py-12">
-        <div className="rounded-2xl border bg-white p-8 shadow-xl">
-          <h1 className="text-xl font-semibold text-slate-900">
-            Create User
-          </h1>
-          <p className="mt-1 text-sm text-slate-600">
-            Add a new agent or admin to the system
-          </p>
-
-          <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-            <Input
-              name="firstName"
-              placeholder="First name"
-              value={form.firstName}
-              onChange={handleChange}
-              required
-            />
-
-            <Input
-              name="lastName"
-              placeholder="Last name"
-              value={form.lastName}
-              onChange={handleChange}
-              required
-            />
-
-            <Input
-              name="username"
-              placeholder="Username"
-              value={form.username}
-              onChange={handleChange}
-              required
-            />
-
-
-            <div className="relative">
-              <Input
-                type={showPassword ? "text" : "password"}
-                name="password"
-                placeholder="Password"
-                value={form.password}
-                onChange={handleChange}
-                required
-              />
-              <button
-                type="button"
-                tabIndex={-1}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-700 focus:outline-none"
-                onClick={() => setShowPassword((prev) => !prev)}
-                aria-label={showPassword ? "Hide password" : "Show password"}
-              >
-                {showPassword ? (
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 0 0 2.25 12c2.036 3.772 6.066 6.75 9.75 6.75 1.77 0 3.487-.47 4.97-1.277M21.75 12c-.512-.948-1.21-1.927-2.02-2.777m-2.32-2.197A9.716 9.716 0 0 0 12 5.25c-2.36 0-4.693.81-6.73 2.223m13.46 0A9.72 9.72 0 0 1 21.75 12c-2.036 3.772-6.066 6.75-9.75 6.75-1.77 0-3.487-.47-4.97-1.277m13.46-10.25L4.47 19.53" />
-                  </svg>
-                ) : (
-                  <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-5 h-5">
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.25 12C3.285 7.943 7.318 4.5 12 4.5c4.682 0 8.715 3.443 9.75 7.5-1.035 4.057-5.068 7.5-9.75 7.5-4.682 0-8.715-3.443-9.75-7.5z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 12a3.75 3.75 0 1 1-7.5 0 3.75 3.75 0 0 1 7.5 0z" />
-                  </svg>
-                )}
-              </button>
-            </div>
-
-            <div>
-              <label className="mb-1 block text-sm font-medium text-slate-700">
-                Role
-              </label>
-              <select
-                name="role"
-                value={form.role}
-                onChange={handleChange}
-                className="w-full rounded-lg border border-slate-300 bg-slate-50 px-3 py-2 text-sm focus:border-indigo-500 focus:ring-2 focus:ring-indigo-400/40 transition"
-              >
-                <option value="AGENT">Agent</option>
-                <option value="ADMIN">Admin</option>
-              </select>
-            </div>
-
-            {error && (
-              <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm font-medium text-rose-700">
-                {error}
+    <div className="min-h-screen bg-slate-50/50 font-sans text-slate-900">
+      <AdminNavbar />
+      
+      <div className="flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8">
+        <Card className="w-full max-w-lg border-slate-200 shadow-xl overflow-hidden">
+          
+          <CardHeader className="bg-gradient-to-r from-teal-50 to-cyan-50 border-b border-teal-100 pb-6">
+            <div className="flex items-center gap-3">
+              <div className="p-2 bg-white rounded-lg shadow-sm border border-teal-100">
+                <UserPlus className="h-6 w-6 text-teal-600" />
               </div>
-            )}
-
-            {success && (
-              <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-700">
-                {success}
+              <div>
+                <CardTitle className="text-xl text-teal-900">Create New User</CardTitle>
+                <CardDescription className="text-teal-700/70">
+                  Onboard a new agent or administrator.
+                </CardDescription>
               </div>
-            )}
+            </div>
+          </CardHeader>
 
-            <Button className="w-full bg-gradient-to-r from-teal-600 to-indigo-600 text-white shadow hover:shadow-lg active:scale-[0.98] transition-all">
-              Create User
-            </Button>
-          </form>
-        </div>
+          <CardContent className="pt-8 px-8 pb-8">
+            <form onSubmit={handleSubmit} className="space-y-5">
+              
+              {/* Name Fields */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">First Name</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <Input
+                      name="firstName"
+                      placeholder="John"
+                      value={form.firstName}
+                      onChange={handleChange}
+                      required
+                      className="pl-9 bg-slate-50 border-slate-200 focus:bg-white transition-all"
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium text-slate-700">Last Name</label>
+                  <div className="relative">
+                    <User className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                    <Input
+                      name="lastName"
+                      placeholder="Doe"
+                      value={form.lastName}
+                      onChange={handleChange}
+                      required
+                      className="pl-9 bg-slate-50 border-slate-200 focus:bg-white transition-all"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Username */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Username</label>
+                <div className="relative">
+                  <AtSign className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <Input
+                    name="username"
+                    placeholder="johndoe_agent"
+                    value={form.username}
+                    onChange={handleChange}
+                    required
+                    className="pl-9 bg-slate-50 border-slate-200 focus:bg-white transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Password */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Password</label>
+                <div className="relative">
+                  <Lock className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+                  <Input
+                    type={showPassword ? "text" : "password"}
+                    name="password"
+                    placeholder="••••••••"
+                    value={form.password}
+                    onChange={handleChange}
+                    required
+                    className="pl-9 pr-10 bg-slate-50 border-slate-200 focus:bg-white transition-all"
+                  />
+                  <button
+                    type="button"
+                    tabIndex={-1}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 focus:outline-none transition-colors"
+                    onClick={() => setShowPassword((prev) => !prev)}
+                  >
+                    {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Role Select */}
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">System Role</label>
+                <div className="relative">
+                  <Shield className="absolute left-3 top-3 h-4 w-4 text-slate-400 z-10" />
+                  <Select 
+                    value={form.role} 
+                    onValueChange={handleRoleChange}
+                  >
+                    <SelectTrigger className="pl-9 w-full bg-slate-50 border-slate-200 focus:ring-2 focus:ring-teal-500/20">
+                      <SelectValue placeholder="Select Role" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="AGENT">Agent</SelectItem>
+                      <SelectItem value="ADMIN">Admin</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Feedback Messages */}
+              {error && (
+                <div className="flex items-center gap-2 rounded-lg border border-rose-200 bg-rose-50 px-4 py-3 text-sm font-medium text-rose-700 animate-in fade-in slide-in-from-top-1">
+                  <AlertCircle className="h-4 w-4 shrink-0" />
+                  {error}
+                </div>
+              )}
+
+              {success && (
+                <div className="flex items-center gap-2 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 animate-in fade-in slide-in-from-top-1">
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                  {success}
+                </div>
+              )}
+
+              {/* Submit Button */}
+              <Button 
+                type="submit"
+                className="w-full bg-gradient-to-r from-teal-500 to-cyan-600 hover:from-teal-600 hover:to-cyan-700 text-white shadow-md hover:shadow-lg transition-all h-11 text-sm font-semibold"
+              >
+                Create User Account
+              </Button>
+
+            </form>
+          </CardContent>
+        </Card>
       </div>
     </div>
   );

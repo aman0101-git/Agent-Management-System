@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { fetchAnalytics, fetchAgentTarget, updateAgentTarget } from "@/api/agentApi";
 import { Button } from "@/components/ui/button";
+import AgentNavbar from "../../components/AgentNavbar";
 
 const PerformanceAnalytics = () => {
   const { token } = useAuth();
@@ -97,8 +98,9 @@ const PerformanceAnalytics = () => {
   const { overview, breakdown, summary, monthlySummary } = analytics;
 
   return (
-    <div className="p-6 bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
-      <div className="max-w-7xl mx-auto">
+    <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+      <AgentNavbar/>
+      <div className="max-w-7xl mx-auto p-6">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">

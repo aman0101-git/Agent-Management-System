@@ -2,7 +2,20 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { searchCustomers } from "@/api/agentApi";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
+import AgentNavbar from "../../components/AgentNavbar";
+import { 
+  Search, 
+  User, 
+  Phone, 
+  CreditCard, 
+  FileText, 
+  ChevronRight, 
+  Loader2 
+} from "lucide-react";
 
 const CustomerSearch = () => {
   const { token } = useAuth();
@@ -51,156 +64,159 @@ const CustomerSearch = () => {
     }).format(amount);
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "-";
-    return new Date(dateStr).toLocaleDateString("en-IN", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-    });
-  };
-
   return (
-    <div className="p-2 sm:p-4 md:p-6 bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
-      <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-xl sm:text-3xl font-bold text-slate-900 mb-2">
-            Customer Search
+    <div className="min-h-screen bg-slate-50/50 font-sans text-slate-900">
+      <AgentNavbar />
+      
+      <main className="mx-auto max-w-5xl px-4 py-12">
+        
+        {/* Header & Search Hero */}
+        <div className="text-center mb-10 space-y-4">
+          <h1 className="text-3xl sm:text-4xl font-bold text-slate-900">
+            Find Any Customer
           </h1>
-          <p className="text-xs sm:text-base text-slate-600">
-            Search any customer by Loan ID, Name, or Phone Number
+          <p className="text-slate-500 text-lg max-w-xl mx-auto">
+            Instantly locate customer records by Loan ID, full name, or registered phone number.
           </p>
         </div>
 
-        {/* Search Section */}
-        <div className="bg-white rounded-lg shadow-md p-3 sm:p-6 mb-8">
-          <div className="flex flex-col sm:flex-row gap-3">
+        {/* Search Bar Container */}
+        <div className="max-w-xl mx-auto mb-12">
+          <div className="relative flex items-center shadow-lg rounded-full bg-white ring-1 ring-slate-200 focus-within:ring-2 focus-within:ring-indigo-500 focus-within:shadow-xl transition-all p-2">
+            <div className="pl-4 text-slate-400">
+              <Search className="h-6 w-6" />
+            </div>
             <input
               type="text"
-              placeholder="Enter Loan ID, Customer Name, or Phone Number..."
+              placeholder="Search by Loan ID, Name, or Phone..."
               value={searchInput}
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              className="flex-1 px-4 py-2 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 text-xs sm:text-base"
+              className="w-full bg-transparent border-none text-lg px-4 py-3 focus:outline-none placeholder:text-slate-400 text-slate-900"
+              autoFocus
             />
             <Button
               onClick={handleSearch}
               disabled={loading}
-              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg font-medium"
+              className="rounded-full px-8 py-6 h-auto text-base font-semibold bg-indigo-600 hover:bg-indigo-700 text-white transition-all shadow-md hover:shadow-lg"
             >
-              {loading ? "Searching..." : "Search"}
+              {loading ? (
+                <Loader2 className="h-5 w-5 animate-spin" />
+              ) : (
+                "Search"
+              )}
             </Button>
           </div>
         </div>
 
         {/* Results Section */}
-        {hasSearched && (
-          <div className="bg-white rounded-lg shadow-md overflow-x-auto">
-            {results.length === 0 ? (
-              <div className="p-8 text-center text-slate-600">
-                <p className="text-base sm:text-lg font-medium">
-                  No customers found matching "{searchInput}"
-                </p>
-              </div>
-            ) : (
-              <>
-                <div className="p-4 bg-slate-50 border-b border-slate-200">
-                  <p className="text-xs sm:text-sm font-medium text-slate-700">
-                    Found {results.length} customer(s)
-                  </p>
-                </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full min-w-[700px]">
-                    <thead className="bg-slate-100 border-b border-slate-200">
-                      <tr>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
-                          Loan ID
-                        </th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
-                          Customer Name
-                        </th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
-                          Phone
-                        </th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
-                          Outstanding
-                        </th>
-                        <th className="px-4 sm:px-6 py-3 text-left text-xs font-semibold text-slate-700 uppercase">
-                          Loan Status
-                        </th>
-                        <th className="px-4 sm:px-6 py-3 text-center text-xs font-semibold text-slate-700 uppercase">
-                          Action
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200">
-                      {results.map((customer) => (
-                        <tr key={customer.id} className="hover:bg-slate-50">
-                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm font-medium text-slate-900">
-                            {customer.loan_agreement_no}
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm text-slate-700">
-                            {customer.cust_name}
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm text-slate-700">
-                            {customer.mobileno}
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm font-medium text-slate-900">
-                            {formatCurrency(customer.amt_outst)}
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-xs sm:text-sm">
-                            <span className="inline-block px-3 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
-                              {customer.loan_status || "ACTIVE"}
-                            </span>
-                          </td>
-                          <td className="px-4 sm:px-6 py-4 text-center">
-                            <Button
-                              onClick={() => {
-                                setSelectedCaseId(customer.id);
-                                setDrawerOpen(true);
-                              }}
-                              className="bg-green-600 hover:bg-green-700 text-white px-4 py-1 rounded text-xs sm:text-sm font-medium"
-                            >
-                              Open
-                            </Button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )}
-          </div>
-        )}
+        <div className="max-w-4xl mx-auto">
+          {hasSearched && (
+            <div className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+              {results.length === 0 ? (
+                <Card className="border-dashed border-2 border-slate-200 bg-slate-50">
+                  <div className="p-12 text-center">
+                    <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 mb-4">
+                      <Search className="h-8 w-8 text-slate-400" />
+                    </div>
+                    <h3 className="text-lg font-medium text-slate-900">No customers found</h3>
+                    <p className="text-slate-500 mt-1">
+                      We couldn't find anything matching "{searchInput}". Try a different keyword.
+                    </p>
+                  </div>
+                </Card>
+              ) : (
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between px-2">
+                    <h2 className="text-sm font-semibold text-slate-500 uppercase tracking-wider">
+                      Search Results ({results.length})
+                    </h2>
+                  </div>
+                  
+                  {results.map((customer) => (
+                    <Card 
+                      key={customer.id}
+                      className="group overflow-hidden border-slate-200 hover:border-indigo-300 hover:shadow-md transition-all duration-200 cursor-pointer"
+                      onClick={() => {
+                        setSelectedCaseId(customer.id);
+                        setDrawerOpen(true);
+                      }}
+                    >
+                      <CardContent className="p-0">
+                        <div className="flex flex-col sm:flex-row items-stretch">
+                          
+                          {/* Left Status Stripe */}
+                          <div className={`w-full sm:w-2 ${
+                            customer.loan_status === "CLOSED" ? "bg-emerald-500" : "bg-indigo-500"
+                          }`} />
 
-        {/* Empty State */}
-        {!hasSearched && (
-          <div className="bg-white rounded-lg shadow-md p-8 sm:p-12 text-center">
-            <div className="text-slate-400 mb-4">
-              <svg
-                className="w-12 h-12 sm:w-16 sm:h-16 mx-auto"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                />
-              </svg>
+                          <div className="flex-1 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-6">
+                            
+                            {/* Main Info */}
+                            <div className="flex items-start gap-4">
+                              <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 font-bold text-lg shrink-0">
+                                {customer.cust_name?.charAt(0) || <User className="h-6 w-6" />}
+                              </div>
+                              <div>
+                                <h3 className="text-lg font-semibold text-slate-900 group-hover:text-indigo-600 transition-colors">
+                                  {customer.cust_name}
+                                </h3>
+                                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 mt-1 text-sm text-slate-500">
+                                  <span className="flex items-center gap-1">
+                                    <CreditCard className="h-3.5 w-3.5" />
+                                    {customer.loan_agreement_no}
+                                  </span>
+                                  <span className="flex items-center gap-1">
+                                    <Phone className="h-3.5 w-3.5" />
+                                    {customer.mobileno}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Stats & Action */}
+                            <div className="flex items-center gap-6 w-full sm:w-auto justify-between sm:justify-end">
+                              <div className="text-right">
+                                <p className="text-xs text-slate-500 uppercase font-medium">POS Amount</p>
+                                <p className="text-lg font-bold text-slate-900">
+                                  {formatCurrency(customer.pos)}
+                                </p>
+                              </div>
+                              
+                              <div className="flex items-center gap-4">
+                                <Badge variant={customer.loan_status === "CLOSED" ? "success" : "secondary"} className="hidden sm:inline-flex">
+                                  {customer.loan_status || "ACTIVE"}
+                                </Badge>
+                                <div className="h-10 w-10 rounded-full bg-slate-50 flex items-center justify-center group-hover:bg-indigo-50 group-hover:text-indigo-600 transition-colors">
+                                  <ChevronRight className="h-5 w-5" />
+                                </div>
+                              </div>
+                            </div>
+
+                          </div>
+                        </div>
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              )}
             </div>
-            <p className="text-slate-600 text-base sm:text-lg">
-              Start searching to find customers
-            </p>
-          </div>
-        )}
-      </div>
+          )}
 
-      {/* Customer Detail Drawer */}
+          {/* Empty State / Initial View */}
+          {!hasSearched && (
+            <div className="text-center py-20 opacity-50">
+              <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-slate-100 mb-6">
+                <FileText className="h-10 w-10 text-slate-300" />
+              </div>
+              <p className="text-slate-400">Enter a search term above to begin.</p>
+            </div>
+          )}
+        </div>
+
+      </main>
+
+      {/* Detail Drawer */}
       {selectedCaseId && (
         <CustomerDetailDrawer
           isOpen={drawerOpen}
