@@ -524,29 +524,30 @@ export const getAgentAnalytics = async (req, res) => {
     const agentId = req.user.id;
     const { timeFilter = 'thisMonth', fromDate, toDate } = req.query;
 
-    // ✅ Validate custom date range
+    /* ==========================================
+       1. DATE HANDLING & VALIDATION
+       ========================================== */
+    
+    // Validate custom date range
     if (timeFilter === 'custom') {
       if (!fromDate || !toDate) {
         return res.status(400).json({ message: "fromDate and toDate required for custom range" });
       }
-
       const from = new Date(fromDate);
       const to = new Date(toDate);
 
       if (isNaN(from.getTime()) || isNaN(to.getTime())) {
         return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD" });
       }
-
       if (from > to) {
         return res.status(400).json({ message: "fromDate must be <= toDate" });
       }
     }
 
-    // ✅ Calculate date range based on timeFilter
+    // Calculate Dynamic Date Range
     const today = new Date();
     let startDate = new Date();
     let endDate = new Date();
-
     endDate.setHours(23, 59, 59, 999);
 
     if (timeFilter === 'custom') {
@@ -565,7 +566,10 @@ export const getAgentAnalytics = async (req, res) => {
           endDate.setHours(23, 59, 59, 999);
           break;
         case 'thisWeek':
-          startDate.setDate(today.getDate() - today.getDay());
+          // Adjust to start of week (assuming Monday start, or use your preferred locale logic)
+          const day = today.getDay();
+          const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
+          startDate.setDate(diff); 
           startDate.setHours(0, 0, 0, 0);
           break;
         case 'thisMonth':
@@ -580,7 +584,7 @@ export const getAgentAnalytics = async (req, res) => {
     const startDateStr = startDate.toISOString();
     const endDateStr = endDate.toISOString();
 
-    // ✅ Calculate monthly date range (ALWAYS calendar month, independent of filter)
+    // Calculate Fixed Monthly Range (For Targets/Monthly Summary)
     const monthlyStart = new Date();
     monthlyStart.setDate(1);
     monthlyStart.setHours(0, 0, 0, 0);
@@ -593,77 +597,66 @@ export const getAgentAnalytics = async (req, res) => {
     const monthlyStartStr = monthlyStart.toISOString();
     const monthlyEndStr = monthlyEnd.toISOString();
 
-    // ✅ Fetch agent target for CURRENT MONTH
     const currentMonthStr = `${monthlyStart.getFullYear()}-${String(
       monthlyStart.getMonth() + 1
     ).padStart(2, '0')}`; // YYYY-MM
 
+    /* ==========================================
+       2. FETCH TARGETS
+       ========================================== */
     const [[agentTarget]] = await pool.query(
-      `
-      SELECT target_amount 
-      FROM agent_targets 
-      WHERE agent_id = ? AND month = ?
-      LIMIT 1
-      `,
+      `SELECT target_amount FROM agent_targets WHERE agent_id = ? AND month = ? LIMIT 1`,
       [agentId, currentMonthStr]
     );
-
     const targetAmount = agentTarget?.target_amount || null;
 
-    /* ===============================
-       SECTION A: Collection Summary (Filtered Range)
-       This was the missing block. It fetches the total collected stats 
-       for the selected time filter.
-       =============================== */
-    const [[collectionSummary]] = await pool.query(
+    /* ==========================================
+       SECTION A: COLLECTION BREAKDOWN & SUMMARY
+       Logic: 
+       1. Group cash by the customer's CURRENT status.
+       2. Sum ALL payments for that customer in the period.
+       ========================================== */
+    const [breakdownRows] = await pool.query(
       `
       SELECT 
-        COUNT(*) AS total_collected_count, 
-        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN (
-          SELECT agent_case_id, MAX(created_at) AS latest_time
-          FROM agent_dispositions
-          WHERE agent_id = ?
-            AND created_at BETWEEN ? AND ?
-          GROUP BY agent_case_id
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-          AND latest.latest_time = ad.created_at
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
-      `,
-      [agentId, startDateStr, endDateStr]
-    );
-
-    /* ===============================
-       SECTION B: Collection Breakdown (Filtered Range)
-       =============================== */
-    const [collectionBreakdown] = await pool.query(
-      `
-        SELECT disposition, COUNT(DISTINCT agent_case_id) AS customer_count, COALESCE(SUM(promise_amount), 0) AS total_amount
-        FROM (
-          SELECT ad.*
+        latest_status.disposition, 
+        COUNT(DISTINCT latest_status.agent_case_id) AS customer_count, 
+        COALESCE(SUM(customer_totals.total_paid), 0) AS total_amount
+      FROM 
+        (
+          -- Subquery 1: Find the LATEST status for each customer in period
+          -- This determines if they are currently PIF, PRT, etc.
+          SELECT ad.agent_case_id, ad.disposition
           FROM agent_dispositions ad
           JOIN (
             SELECT agent_case_id, MAX(created_at) AS latest_time
             FROM agent_dispositions
-            WHERE agent_id = ?
+            WHERE agent_id = ? 
               AND created_at BETWEEN ? AND ?
             GROUP BY agent_case_id
-          ) latest
-            ON latest.agent_case_id = ad.agent_case_id
+          ) latest 
+            ON latest.agent_case_id = ad.agent_case_id 
             AND latest.latest_time = ad.created_at
-        ) latest_cases
-        WHERE disposition IN ('PIF','SIF','FCL','PRT')
-        GROUP BY disposition
+          WHERE ad.disposition IN ('PIF','SIF','FCL','PRT')
+        ) latest_status
+      JOIN 
+        (
+          -- Subquery 2: Calculate TOTAL CASH collected from that customer in period
+          -- This sums up 5000 + 10000 = 15000 regardless of dates
+          SELECT agent_case_id, SUM(promise_amount) as total_paid
+          FROM agent_dispositions
+          WHERE agent_id = ? 
+            AND created_at BETWEEN ? AND ?
+            AND disposition IN ('PIF','SIF','FCL','PRT')
+          GROUP BY agent_case_id
+        ) customer_totals 
+        ON customer_totals.agent_case_id = latest_status.agent_case_id
+      GROUP BY latest_status.disposition
       `,
-      [agentId, startDateStr, endDateStr]
+      [agentId, startDateStr, endDateStr, agentId, startDateStr, endDateStr]
     );
 
-    // Format collection breakdown
+    // Format Breakdown Object
     const formattedBreakdown = {
       PIF: { customer_count: 0, total_amount: 0 },
       SIF: { customer_count: 0, total_amount: 0 },
@@ -671,16 +664,26 @@ export const getAgentAnalytics = async (req, res) => {
       PRT: { customer_count: 0, total_amount: 0 },
     };
 
-    collectionBreakdown.forEach((item) => {
-      formattedBreakdown[item.disposition] = {
-        customer_count: item.customer_count,
-        total_amount: item.total_amount,
-      };
+    let totalCollectedAmount = 0;
+    let totalCollectedCount = 0;
+
+    breakdownRows.forEach((item) => {
+      // Update Breakdown
+      if (formattedBreakdown[item.disposition]) {
+        formattedBreakdown[item.disposition] = {
+          customer_count: item.customer_count,
+          total_amount: item.total_amount,
+        };
+      }
+      // Calculate Totals for Summary
+      totalCollectedAmount += parseFloat(item.total_amount || 0);
+      totalCollectedCount += parseInt(item.customer_count || 0);
     });
 
-    /* ===============================
-       SECTION C: PTP Overview (Filtered Range)
-       =============================== */
+    /* ==========================================
+       SECTION B: CALL ACTIVITY & PTP OVERVIEW
+       Logic: Count EVERY row to capture full agent effort.
+       ========================================== */
     const [[ptpData]] = await pool.query(
       `
         SELECT 
@@ -694,33 +697,42 @@ export const getAgentAnalytics = async (req, res) => {
       [agentId, startDateStr, endDateStr]
     );
 
-    /* ===============================
-       SECTION D: Monthly Summary (ALWAYS CALENDAR MONTH)
-       =============================== */
-    const [[monthlySummary]] = await pool.query(
+    /* ==========================================
+       SECTION C: MONTHLY SUMMARY (Calendar Month)
+       Logic: Same "Cash vs Status" logic as Section A, but fixed to Month dates.
+       ========================================== */
+    const [[monthlyActuals]] = await pool.query(
       `
-      SELECT
-        COUNT(*) AS total_collected_count,
-        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN (
-          SELECT agent_case_id, MAX(created_at) AS latest_time
+      SELECT 
+        COUNT(DISTINCT latest_status.agent_case_id) AS total_collected_count, 
+        COALESCE(SUM(customer_totals.total_paid), 0) AS total_collected_amount
+      FROM 
+        (
+          SELECT ad.agent_case_id
+          FROM agent_dispositions ad
+          JOIN (
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions
+            WHERE agent_id = ? AND created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) latest ON latest.agent_case_id = ad.agent_case_id AND latest.latest_time = ad.created_at
+          WHERE ad.disposition IN ('PIF','SIF','FCL','PRT')
+        ) latest_status
+      JOIN 
+        (
+          SELECT agent_case_id, SUM(promise_amount) as total_paid
           FROM agent_dispositions
-          WHERE agent_id = ?
+          WHERE agent_id = ? 
             AND created_at BETWEEN ? AND ?
+            AND disposition IN ('PIF','SIF','FCL','PRT')
           GROUP BY agent_case_id
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-          AND latest.latest_time = ad.created_at
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+        ) customer_totals ON customer_totals.agent_case_id = latest_status.agent_case_id
       `,
-      [agentId, monthlyStartStr, monthlyEndStr]
+      [agentId, monthlyStartStr, monthlyEndStr, agentId, monthlyStartStr, monthlyEndStr]
     );
 
-    // Calculate monthly expected amount (PTP - RTP)
+    // Calculate Monthly Expected (Net PTP)
+    // Formula: Total PTP - Total RTP (Broken Promises)
     const [[monthlyExpected]] = await pool.query(
       `
       SELECT
@@ -736,16 +748,16 @@ export const getAgentAnalytics = async (req, res) => {
       [agentId, monthlyStartStr, monthlyEndStr]
     );
 
-    // Calculate achievement percentage for monthly summary
-    const monthlyActual = monthlySummary.total_collected_amount || 0;
+    // Calculate Achievement %
+    const monthlyActualAmount = monthlyActuals?.total_collected_amount || 0;
     let achievementPercent = 0;
     if (targetAmount && targetAmount > 0) {
-      achievementPercent = ((monthlyActual / targetAmount) * 100).toFixed(2);
+      achievementPercent = ((monthlyActualAmount / targetAmount) * 100).toFixed(2);
     }
 
-    /* ===============================
+    /* ==========================================
        FINAL RESPONSE
-       =============================== */
+       ========================================== */
     res.json({
       timeFilter,
       dateRange: { start: startDateStr, end: endDateStr },
@@ -756,14 +768,13 @@ export const getAgentAnalytics = async (req, res) => {
       },
       breakdown: formattedBreakdown,
       summary: {
-        total_collected_count: collectionSummary?.total_collected_count || 0,
-        total_collected_amount: collectionSummary?.total_collected_amount || 0,
+        total_collected_count: totalCollectedCount,
+        total_collected_amount: totalCollectedAmount,
       },
-      // Monthly summary (ALWAYS calendar month, independent of filter)
       monthlySummary: {
         dateRange: { start: monthlyStartStr, end: monthlyEndStr },
-        total_collected_count: monthlySummary?.total_collected_count || 0,
-        total_collected_amount: monthlyActual,
+        total_collected_count: monthlyActuals?.total_collected_count || 0,
+        total_collected_amount: monthlyActualAmount,
         expected_amount: monthlyExpected?.expected_amount || 0,
         target_amount: targetAmount,
         achievement_percent: targetAmount ? parseFloat(achievementPercent) : null,

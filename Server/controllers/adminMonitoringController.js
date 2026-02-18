@@ -13,9 +13,9 @@ export const getMonitoringAnalytics = async (req, res) => {
       end_date,
     } = req.query;
 
-    /* ===============================
-       1. VALIDATION
-       =============================== */
+    /* ==========================================
+       1. VALIDATION & DATES
+       ========================================== */
     if (!start_date || !end_date) {
       return res
         .status(400)
@@ -34,9 +34,9 @@ export const getMonitoringAnalytics = async (req, res) => {
     const startDateStr = startDate.toISOString();
     const endDateStr = endDate.toISOString();
 
-    /* ===============================
-       2. CURRENT CALENDAR MONTH
-       =============================== */
+    /* ==========================================
+       2. MONTHLY DATE RANGE (For Targets/Summary)
+       ========================================== */
     const monthStart = new Date();
     monthStart.setDate(1);
     monthStart.setHours(0, 0, 0, 0);
@@ -53,9 +53,9 @@ export const getMonitoringAnalytics = async (req, res) => {
       monthStart.getMonth() + 1
     ).padStart(2, "0")}`;
 
-    /* ===============================
-       3. DYNAMIC FILTERS (SCHEMA-SAFE)
-       =============================== */
+    /* ==========================================
+       3. DYNAMIC FILTERS (Applied to ALL queries)
+       ========================================== */
     let whereClause = `
       WHERE u.role = 'AGENT'
         AND u.isActive = 1
@@ -78,10 +78,9 @@ export const getMonitoringAnalytics = async (req, res) => {
       params.push(...campaignIds);
     }
 
-    /* ===============================
-       SECTION A: CALLS + PTP
-       (Counts all interactions, no "Latest" logic needed for raw activity)
-       =============================== */
+    /* ==========================================
+       SECTION A: CALLS + PTP OVERVIEW
+       ========================================== */
     const [[overview]] = await pool.query(
       `
       SELECT
@@ -101,39 +100,61 @@ export const getMonitoringAnalytics = async (req, res) => {
       [...params, startDateStr, endDateStr]
     );
 
-    /* ===============================
-       SECTION B: COLLECTION BREAKDOWN
-       (Uses "Latest Case" Logic to prevent double counting)
-       =============================== */
+    /* ==========================================
+       SECTION B & C: COLLECTION BREAKDOWN & TOTALS
+       ========================================== */
+    
+    // ✅ FIXED: Query Params now match the SQL structure exactly (3 occurrences of whereClause)
+    const queryParams = [
+      ...params, startDateStr, endDateStr, // 1. Inner 'latest' table (Filters by Date)
+      ...params,                           // 2. Outer 'latest_status' wrapper (Filters by Agent/Campaign only)
+      ...params, startDateStr, endDateStr  // 3. 'customer_totals' table (Filters by Date)
+    ];
+
     const [breakdownRows] = await pool.query(
       `
-      SELECT
-        disposition,
-        COUNT(DISTINCT agent_case_id) AS customer_count,
-        COALESCE(SUM(promise_amount), 0) AS total_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN users u ON u.id = ad.agent_id
-        LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-        JOIN (
-           -- Get the latest disposition per case within the timeframe
-           SELECT agent_case_id, MAX(created_at) AS latest_time
-           FROM agent_dispositions ad
-           JOIN users u ON u.id = ad.agent_id
-           LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-           ${whereClause}
-             AND ad.created_at BETWEEN ? AND ?
-           GROUP BY agent_case_id
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-          AND latest.latest_time = ad.created_at
-        ${whereClause} 
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
-      GROUP BY disposition
+      SELECT 
+        latest_status.disposition, 
+        COUNT(DISTINCT latest_status.agent_case_id) AS customer_count, 
+        COALESCE(SUM(customer_totals.total_paid), 0) AS total_amount
+      FROM 
+        (
+          -- Usage 2: Outer Wrapper (Needs ...params)
+          SELECT ad.agent_case_id, ad.disposition
+          FROM agent_dispositions ad
+          JOIN users u ON u.id = ad.agent_id
+          LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+          JOIN (
+            -- Usage 1: Inner Subquery (Needs ...params + dates)
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions ad
+            JOIN users u ON u.id = ad.agent_id
+            LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+            ${whereClause}
+              AND ad.created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) latest 
+            ON latest.agent_case_id = ad.agent_case_id 
+            AND latest.latest_time = ad.created_at
+          ${whereClause}
+            AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+        ) latest_status
+      JOIN 
+        (
+          -- Usage 3: Money Query (Needs ...params + dates)
+          SELECT agent_case_id, SUM(promise_amount) as total_paid
+          FROM agent_dispositions ad
+          JOIN users u ON u.id = ad.agent_id
+          LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+          ${whereClause}
+            AND ad.created_at BETWEEN ? AND ?
+            AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+          GROUP BY agent_case_id
+        ) customer_totals 
+        ON customer_totals.agent_case_id = latest_status.agent_case_id
+      GROUP BY latest_status.disposition
       `,
-      [...params, startDateStr, endDateStr, ...params] // Params repeated for inner subquery
+      queryParams
     );
 
     const breakdown = {
@@ -143,78 +164,72 @@ export const getMonitoringAnalytics = async (req, res) => {
       PRT: { customer_count: 0, total_amount: 0 },
     };
 
+    let totalCollectedCount = 0;
+    let totalCollectedAmount = 0;
+
     breakdownRows.forEach((row) => {
-      breakdown[row.disposition] = {
-        customer_count: row.customer_count,
-        total_amount: row.total_amount,
-      };
+      if (breakdown[row.disposition]) {
+        breakdown[row.disposition] = {
+          customer_count: row.customer_count,
+          total_amount: row.total_amount,
+        };
+      }
+      totalCollectedCount += parseInt(row.customer_count || 0);
+      totalCollectedAmount += parseFloat(row.total_amount || 0);
     });
 
-    /* ===============================
-       SECTION C: TOTAL COLLECTION SUMMARY
-       (Uses "Latest Case" Logic)
-       =============================== */
-    const [[summary]] = await pool.query(
-      `
-      SELECT
-        COUNT(*) AS total_collected_count,
-        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN users u ON u.id = ad.agent_id
-        LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-        JOIN (
-           SELECT agent_case_id, MAX(created_at) AS latest_time
-           FROM agent_dispositions ad
-           JOIN users u ON u.id = ad.agent_id
-           LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-           ${whereClause}
-             AND ad.created_at BETWEEN ? AND ?
-           GROUP BY agent_case_id
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-          AND latest.latest_time = ad.created_at
-        ${whereClause}
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
-      `,
-      [...params, startDateStr, endDateStr, ...params]
-    );
-
-    /* ===============================
+    /* ==========================================
        SECTION D: MONTHLY SUMMARY
-       (Uses "Latest Case" Logic + Correct Filters)
-       =============================== */
-    const [[monthlyActual]] = await pool.query(
+       ========================================== */
+    
+    // ✅ FIXED: Monthly Query Params alignment
+    const monthlyQueryParams = [
+      ...params, monthStartStr, monthEndStr, // 1. Inner 'latest'
+      ...params,                             // 2. Outer 'latest_status'
+      ...params, monthStartStr, monthEndStr  // 3. 'customer_totals'
+    ];
+
+    const [[monthlyActuals]] = await pool.query(
       `
-      SELECT
-        COUNT(*) AS total_collected_count,
-        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN users u ON u.id = ad.agent_id
-        LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-        JOIN (
-           SELECT agent_case_id, MAX(created_at) AS latest_time
-           FROM agent_dispositions ad
-           JOIN users u ON u.id = ad.agent_id
-           LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
-           ${whereClause}
-             AND ad.created_at BETWEEN ? AND ?
-           GROUP BY agent_case_id
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-          AND latest.latest_time = ad.created_at
-        ${whereClause}
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+      SELECT 
+        COUNT(DISTINCT latest_status.agent_case_id) AS total_collected_count, 
+        COALESCE(SUM(customer_totals.total_paid), 0) AS total_collected_amount
+      FROM 
+        (
+          SELECT ad.agent_case_id
+          FROM agent_dispositions ad
+          JOIN users u ON u.id = ad.agent_id
+          LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+          JOIN (
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions ad
+            JOIN users u ON u.id = ad.agent_id
+            LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+            ${whereClause}
+              AND ad.created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) latest 
+            ON latest.agent_case_id = ad.agent_case_id 
+            AND latest.latest_time = ad.created_at
+          ${whereClause}
+            AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+        ) latest_status
+      JOIN 
+        (
+          SELECT agent_case_id, SUM(promise_amount) as total_paid
+          FROM agent_dispositions ad
+          JOIN users u ON u.id = ad.agent_id
+          LEFT JOIN campaign_agents ca ON ca.agent_id = ad.agent_id
+          ${whereClause}
+            AND ad.created_at BETWEEN ? AND ?
+            AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+          GROUP BY agent_case_id
+        ) customer_totals 
+        ON customer_totals.agent_case_id = latest_status.agent_case_id
       `,
-      [...params, monthStartStr, monthEndStr, ...params]
+      monthlyQueryParams
     );
 
-    // ✅ FIXED: Now respects the Agent/Campaign filters
     const [[monthlyExpected]] = await pool.query(
       `
       SELECT
@@ -232,60 +247,43 @@ export const getMonitoringAnalytics = async (req, res) => {
       [...params, monthStartStr, monthEndStr]
     );
 
-    /* ===============================
-       SECTION E: TARGET CALCULATION
-       (Smart switch between Agent Targets and Campaign Targets)
-       =============================== */
+    /* ==========================================
+       SECTION E: TARGETS
+       ========================================== */
     let targetAmount = 0;
 
-    // Case 1: Specific Agents Selected -> Sum AGENT TARGETS
     if (agent_id !== "ALL") {
       const agentIds = agent_id.split(",").map((id) => id.trim());
       const placeholders = agentIds.map(() => "?").join(",");
-      
       const [[row]] = await pool.query(
-        `SELECT SUM(target_amount) AS target_amount 
-         FROM agent_targets 
-         WHERE agent_id IN (${placeholders}) 
-           AND month = ?`,
+        `SELECT SUM(target_amount) AS target_amount FROM agent_targets WHERE agent_id IN (${placeholders}) AND month = ?`,
         [...agentIds, currentMonth]
       );
       targetAmount = row?.target_amount || 0;
-    } 
-    // Case 2: Specific Campaigns Selected -> Sum CAMPAIGN TARGETS
-    else if (campaign_id !== "ALL") {
+    } else if (campaign_id !== "ALL") {
       const campaignIds = campaign_id.split(",").map((id) => id.trim());
       const placeholders = campaignIds.map(() => "?").join(",");
-      
       const [[row]] = await pool.query(
-        `SELECT SUM(target_amount) AS target_amount 
-         FROM campaigns 
-         WHERE id IN (${placeholders}) AND status = 'ACTIVE'`,
+        `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE id IN (${placeholders}) AND status = 'ACTIVE'`,
         campaignIds
       );
       targetAmount = row?.target_amount || 0;
-    } 
-    // Case 3: ALL (Overview) -> Sum ALL CAMPAIGN TARGETS
-    else {
+    } else {
       const [[row]] = await pool.query(
         `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE status = 'ACTIVE'`
       );
       targetAmount = row?.target_amount || 0;
     }
 
+    const monthlyActualAmount = monthlyActuals?.total_collected_amount || 0;
     const achievementPercent =
       targetAmount > 0
-        ? Number(
-            (
-              (monthlyActual.total_collected_amount / targetAmount) *
-              100
-            ).toFixed(2)
-          )
+        ? Number(((monthlyActualAmount / targetAmount) * 100).toFixed(2))
         : null;
 
-    /* ===============================
+    /* ==========================================
        FINAL RESPONSE
-       =============================== */
+       ========================================== */
     res.json({
       overview: {
         calls_attended: overview.calls_attended || 0,
@@ -294,13 +292,13 @@ export const getMonitoringAnalytics = async (req, res) => {
       },
       breakdown,
       summary: {
-        total_collected_count: summary.total_collected_count || 0,
-        total_collected_amount: summary.total_collected_amount || 0,
+        total_collected_count: totalCollectedCount,
+        total_collected_amount: totalCollectedAmount,
       },
       monthlySummary: {
-        total_collected_count: monthlyActual.total_collected_count || 0,
-        total_collected_amount: monthlyActual.total_collected_amount || 0,
-        expected_amount: monthlyExpected.expected_amount || 0,
+        total_collected_count: monthlyActuals?.total_collected_count || 0,
+        total_collected_amount: monthlyActualAmount,
+        expected_amount: monthlyExpected?.expected_amount || 0,
         target_amount: targetAmount,
         achievement_percent: achievementPercent,
       },
@@ -311,17 +309,13 @@ export const getMonitoringAnalytics = async (req, res) => {
   }
 };
 
-/* ===============================
+/* ==========================================
    HELPERS
-   =============================== */
-
+   ========================================== */
 export const getMonitoringAgents = async (req, res) => {
   try {
     const [agents] = await pool.query(`
-      SELECT id, username
-      FROM users
-      WHERE role = 'AGENT' AND isActive = 1
-      ORDER BY username
+      SELECT id, username FROM users WHERE role = 'AGENT' AND isActive = 1 ORDER BY username
     `);
     res.json({ agents });
   } catch (err) {
@@ -332,10 +326,7 @@ export const getMonitoringAgents = async (req, res) => {
 export const getMonitoringCampaigns = async (req, res) => {
   try {
     const [campaigns] = await pool.query(`
-      SELECT id, campaign_name
-      FROM campaigns
-      WHERE status = 'ACTIVE'
-      ORDER BY campaign_name
+      SELECT id, campaign_name FROM campaigns WHERE status = 'ACTIVE' ORDER BY campaign_name
     `);
     res.json({ campaigns });
   } catch (err) {
