@@ -22,7 +22,7 @@ export const getOnceConstraints = async (req, res) => {
 /**
  * GET /api/agent/cases
  * Fetch agent dashboard list from Coll_Data table
- * Excludes IN_PROCESS status (Rechurn) data
+ * FIX: Joins only the LATEST agent_case to prevent duplicates
  */
 export const getAgentCases = async (req, res) => {
   try {
@@ -39,20 +39,33 @@ export const getAgentCases = async (req, res) => {
         c.insl_amt,
         c.pos,
         c.bom_bucket,
+        
+        -- Get status from the LATEST agent_case for this agent/customer
         COALESCE(ac.status, 'NEW') AS status,
         ac.first_call_at,
         ac.last_call_at,
         ac.follow_up_date,
         ac.follow_up_time
+
       FROM coll_data c
+      
+      /* FIX: Join only the specific LATEST case for this customer & agent */
       LEFT JOIN agent_cases ac
-        ON ac.coll_data_id = c.id
-      /* ISSUE #12 FIX: Ensure agent is mapped to the campaign */
+        ON ac.id = (
+          SELECT id FROM agent_cases 
+          WHERE coll_data_id = c.id 
+            AND agent_id = c.agent_id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        )
+
       INNER JOIN campaign_agents ca
         ON ca.agent_id = ? AND ca.campaign_id = c.campaign_id
+
       WHERE c.agent_id = ?
         AND c.is_active = 1
         AND COALESCE(ac.status, 'NEW') != 'IN_PROGRESS'
+      
       ORDER BY c.created_at DESC
       `,
       [agentId, agentId]
@@ -68,16 +81,15 @@ export const getAgentCases = async (req, res) => {
 /**
  * GET /api/agent/cases/:caseId
  * Fetch single case + disposition history + edit history
- * ISSUE #12 FIX: Verify agent belongs to the case's campaign
+ * FIXED: Removed 'AND c.agent_id = ?' to allow Global View (Edit permissions handled in submitDisposition)
  */
 export const getAgentCaseById = async (req, res) => {
   try {
     const agentId = req.user.id;
-    const { caseId } = req.params;
+    const { caseId } = req.params; // This is coll_data.id
 
     /* ===============================
-       1️⃣ Fetch main case details
-       ISSUE #12 FIX: Verify campaign assignment
+       1️⃣ Fetch main case details (Global View)
        =============================== */
     const [[row]] = await pool.query(
       `
@@ -87,164 +99,103 @@ export const getAgentCaseById = async (req, res) => {
         c.cust_name AS customer_name,
         c.mobileno AS phone,
         c.loan_agreement_no AS loan_id,
+        c.branch_name, c.hub_name, c.group_name, c.agency,
+        c.dpd, c.pos, c.insl_amt, c.inst_over, c.amt_outst, c.tenure,
+        c.bom_bucket, c.penal_over, c.amount_finance, c.product_code,
+        c.loan_status, c.extra_fields, c.res_addr, c.off_addr,
+        c.disb_date, c.maturity_date, c.fdd,
+        c.agent_id, c.batch_month, c.batch_year, c.campaign_id, c.is_active,
 
-        c.branch_name,
-        c.hub_name,
-        c.group_name,
-        c.agency,
-
-        c.dpd,
-        c.pos,
-        c.insl_amt,
-        c.inst_over,
-        c.amt_outst,
-        c.tenure,
-        c.bom_bucket,
-        c.penal_over,
-        c.amount_finance,
-        c.product_code,
-        c.loan_status,
-        c.extra_fields,
-
-        c.res_addr,
-        c.off_addr,
-        c.disb_date,
-        c.maturity_date,
-        c.fdd,
-
-        c.agent_id,
-        c.batch_month,
-        c.batch_year,
-        c.campaign_id,
-        c.is_active,
-
+        -- Status from latest interaction (Global)
         COALESCE(ac.status, 'NEW') AS status,
-        ac.first_call_at,
-        ac.last_call_at,
-        ac.follow_up_date,
-        ac.follow_up_time
+        ac.first_call_at, ac.last_call_at, ac.follow_up_date, ac.follow_up_time
       FROM coll_data c
-      LEFT JOIN agent_cases ac
-        ON ac.coll_data_id = c.id
-      INNER JOIN campaign_agents ca
-        ON ca.agent_id = ? AND ca.campaign_id = c.campaign_id
+      LEFT JOIN agent_cases ac ON ac.coll_data_id = c.id
+      -- Check Campaign Access ONLY (Global View)
+      INNER JOIN campaign_agents ca ON ca.agent_id = ? AND ca.campaign_id = c.campaign_id
       WHERE c.id = ?
-        AND c.agent_id = ?
       ORDER BY ac.created_at DESC
       LIMIT 1
       `,
-      [agentId, caseId, agentId]
+      [agentId, caseId]
     );
 
     if (!row) {
-      return res.status(404).json({ message: "Case not found" });
+      return res.status(404).json({ message: "Case not found or access denied" });
     }
 
     /* ===============================
-       2️⃣ Resolve latest agent_case_id
-       =============================== */
-    const [[agentCase]] = await pool.query(
-      `
-      SELECT id
-      FROM agent_cases
-      WHERE coll_data_id = ?
-        AND agent_id = ?
-      ORDER BY created_at DESC
-      LIMIT 1
-      `,
-      [caseId, agentId]
-    );
-
-    if (!agentCase) {
-      return res.json({
-        case: row,
-        dispositions: [],
-        editHistory: [],
-      });
-    }
-
-    /* ===============================
-       3️⃣ Fetch disposition history
+       2️⃣ Fetch Disposition History (BY CUSTOMER ID)
+       FIX: Joins agent_cases to get ALL history for this customer, 
+       regardless of which agent created it.
        =============================== */
     const [dispositions] = await pool.query(
       `
       SELECT
-        id,
-        agent_case_id,
-        disposition,
-        remarks,
-        promise_amount,
-        follow_up_date,
-        follow_up_time,
-        payment_date,
-        payment_time,
-        ptp_target,
-        created_at
-      FROM agent_dispositions
-      WHERE agent_case_id = ?
-      ORDER BY created_at DESC
+        ad.id,
+        ad.agent_case_id,
+        ad.disposition,
+        ad.remarks,
+        ad.promise_amount,
+        ad.follow_up_date,
+        ad.follow_up_time,
+        ad.payment_date,
+        ad.payment_time,
+        ad.ptp_target,
+        ad.created_at,
+        u.username AS agent_name
+      FROM agent_dispositions ad
+      INNER JOIN agent_cases ac ON ad.agent_case_id = ac.id
+      LEFT JOIN users u ON ad.agent_id = u.id
+      WHERE ac.coll_data_id = ?  -- <--- KEY FIX: Fetch by Customer ID
+      ORDER BY ad.created_at DESC
       `,
-      [agentCase.id]
+      [caseId]
     );
 
     /* ===============================
-       4️⃣ Fetch full edit history
-       ISSUE #8 FIX: Include ptp_target in edit history
+       3️⃣ Fetch Edit History (Linked to displayed dispositions)
        =============================== */
-    const [editHistory] = await pool.query(
-      `
-      SELECT
-        id,
-        agent_case_id,
-        disposition,
-        remarks,
-        promise_amount,
-        follow_up_date,
-        follow_up_time,
-        payment_date,
-        payment_time,
-        ptp_target,
-        edited_at
-      FROM agent_dispositions_edit_history
-      WHERE agent_case_id = ?
-      ORDER BY edited_at DESC
-      `,
-      [agentCase.id]
-    );
+    // We fetch edit history for the dispositions we just retrieved
+    const dispositionIds = dispositions.map(d => d.agent_case_id);
+    let editHistory = [];
+    
+    if (dispositionIds.length > 0) {
+      const [edits] = await pool.query(
+        `
+        SELECT
+          eh.id,
+          eh.agent_case_id,
+          eh.disposition,
+          eh.remarks,
+          eh.promise_amount,
+          eh.follow_up_date,
+          eh.follow_up_time,
+          eh.payment_date,
+          eh.payment_time,
+          eh.ptp_target,
+          eh.edited_at
+        FROM agent_dispositions_edit_history eh
+        INNER JOIN agent_cases ac ON eh.agent_case_id = ac.id
+        WHERE ac.coll_data_id = ?
+        ORDER BY eh.edited_at DESC
+        `,
+        [caseId]
+      );
+      editHistory = edits;
+    }
 
-    // Ensure follow_up_time is always a string in HH:mm:ss format
+    // Format Times
     function formatTime(val) {
       if (!val) return null;
       if (typeof val === 'string') return val;
-      if (val instanceof Date) {
-        // Format as HH:mm:ss
-        return val.toTimeString().slice(0, 8);
-      }
+      if (val instanceof Date) return val.toTimeString().slice(0, 8);
       return String(val);
     }
 
-    // Format main case follow_up_time
-    if (row && 'follow_up_time' in row) {
-      row.follow_up_time = formatTime(row.follow_up_time);
-    }
-
-    // Format all dispositions follow_up_time
-    if (Array.isArray(dispositions)) {
-      for (const disp of dispositions) {
-        if ('follow_up_time' in disp) {
-          disp.follow_up_time = formatTime(disp.follow_up_time);
-        }
-      }
-    }
-
-    // Format all editHistory follow_up_time
-    if (Array.isArray(editHistory)) {
-      for (const edit of editHistory) {
-        if ('follow_up_time' in edit) {
-          edit.follow_up_time = formatTime(edit.follow_up_time);
-        }
-      }
-    }
+    if (row && row.follow_up_time) row.follow_up_time = formatTime(row.follow_up_time);
+    dispositions.forEach(d => { if (d.follow_up_time) d.follow_up_time = formatTime(d.follow_up_time); });
+    editHistory.forEach(e => { if (e.follow_up_time) e.follow_up_time = formatTime(e.follow_up_time); });
 
     return res.json({
       case: row,
@@ -258,36 +209,10 @@ export const getAgentCaseById = async (req, res) => {
   }
 };
 
-
 /**
  * POST /api/agent/cases/:caseId/disposition
- * Submit or edit disposition
+ * Submit or edit disposition with First Call logic fix
  */
-/**
- * RULE-DRIVEN DISPOSITION VALIDATION
- * 
- * Validates submission against disposition rules. For time fields,
- * ensures HH:mm format is preserved (no Date object parsing).
- * 
- * @param {string} dispositionCode - e.g., 'PTP', 'CBC'
- * @param {string} followUpTime - Time in HH:mm format (e.g., "14:30")
- * @returns {object} { valid: boolean, error: string | null }
- */
-function validateTimeFormat(followUpTime) {
-  if (!followUpTime) return { valid: true, error: null };
-  
-  // Must be HH:mm format
-  const timeRegex = /^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/;
-  if (!timeRegex.test(followUpTime)) {
-    return {
-      valid: false,
-      error: `Invalid time format. Expected HH:mm (24-hour), got ${followUpTime}`,
-    };
-  }
-  
-  return { valid: true, error: null };
-}
-
 export const submitDisposition = async (req, res) => {
   const conn = await pool.getConnection();
 
@@ -296,70 +221,37 @@ export const submitDisposition = async (req, res) => {
     const { caseId } = req.params;
 
     const {
-      disposition,
-      remarks,
-      promiseAmount,
-      followUpDate,
-      followUpTime,
-      ptpTarget,
-      paymentDate,
-      isEdit,
+      disposition, remarks, promiseAmount, followUpDate,
+      followUpTime, ptpTarget, paymentDate, isEdit,
     } = req.body;
 
-    // ==========================================
-    // INPUT VALIDATION
-    // ==========================================
-    if (!disposition) {
-      return res.status(400).json({ message: "Disposition required" });
-    }
-
-    if (!DISPOSITION_RULES[disposition]) {
-      return res.status(400).json({
-        message: `Unknown disposition: ${disposition}`,
-      });
-    }
+    // --- Validation (Keep existing logic) ---
+    if (!disposition) return res.status(400).json({ message: "Disposition required" });
+    if (!DISPOSITION_RULES[disposition]) return res.status(400).json({ message: `Unknown disposition: ${disposition}` });
 
     const rule = DISPOSITION_RULES[disposition];
     const errors = [];
-
-    if (rule.requires.amount && (!promiseAmount || Number(promiseAmount) <= 0)) {
-      errors.push(`Amount is required for ${rule.code}`);
-    }
-    if (rule.requires.followUpDate && !followUpDate) {
-      errors.push(`Follow-up date is required for ${rule.code}`);
-    }
-    if (rule.requires.followUpTime && !followUpTime) {
-      errors.push(`Follow-up time is required for ${rule.code}`);
-    }
-    if (disposition === "PTP" && !ptpTarget) {
-      errors.push("PTP target is required");
-    }
-
+    if (rule.requires.amount && (!promiseAmount || Number(promiseAmount) <= 0)) errors.push(`Amount is required`);
+    if (rule.requires.followUpDate && !followUpDate) errors.push(`Follow-up date is required`);
+    if (rule.requires.followUpTime && !followUpTime) errors.push(`Follow-up time is required`);
+    if (disposition === "PTP" && !ptpTarget) errors.push("PTP target is required");
     const safePromiseAmount = rule.requires.amount ? promiseAmount : null;
     const safeFollowUpDate = rule.requires.followUpDate ? followUpDate : null;
     const safeFollowUpTime = rule.requires.followUpTime ? followUpTime : null;
     const safePtpTarget = disposition === "PTP" ? ptpTarget : null;
-
     const paymentDateDispositions = ["PIF", "SIF", "FCL", "PRT"];
-    const safePaymentDate = paymentDateDispositions.includes(disposition)
-      ? paymentDate || null
-      : null;
+    const safePaymentDate = paymentDateDispositions.includes(disposition) ? paymentDate || null : null;
+    if (paymentDateDispositions.includes(disposition) && !safePaymentDate) errors.push(`Payment date is required`);
 
-    if (paymentDateDispositions.includes(disposition) && !safePaymentDate) {
-      errors.push(`Payment date is required for ${disposition}`);
-    }
-
-    if (errors.length > 0) {
-      return res.status(400).json({ message: "Validation failed", errors });
-    }
+    if (errors.length > 0) return res.status(400).json({ message: "Validation failed", errors });
 
     await conn.beginTransaction();
 
     // ==========================================
-    // LOCK AGENT CASE
+    // 1. LOCK AGENT CASE AND FETCH first_call_at
     // ==========================================
-    const [[agentCase]] = await conn.query(
-      `SELECT id, status, coll_data_id
+    let [[agentCase]] = await conn.query(
+      `SELECT id, status, coll_data_id, first_call_at
        FROM agent_cases
        WHERE coll_data_id = ? AND agent_id = ?
        ORDER BY created_at DESC
@@ -368,84 +260,74 @@ export const submitDisposition = async (req, res) => {
       [caseId, agentId]
     );
 
+    // Handle Takeover (New Case for Agent)
     if (!agentCase) {
-      await conn.rollback();
-      return res.status(404).json({ message: "Agent case not found" });
+      const [[customer]] = await conn.query(
+        `SELECT id FROM coll_data WHERE id = ?`, [caseId]
+      );
+      if (!customer) {
+        await conn.rollback();
+        return res.status(404).json({ message: "Customer not found" });
+      }
+
+      await conn.query(`UPDATE coll_data SET agent_id = ? WHERE id = ?`, [agentId, caseId]);
+      
+      const [newCaseResult] = await conn.query(
+        `INSERT INTO agent_cases (agent_id, coll_data_id, status, is_active, created_at)
+         VALUES (?, ?, 'NEW', 1, NOW())`,
+        [agentId, caseId]
+      );
+
+      agentCase = {
+        id: newCaseResult.insertId,
+        status: 'NEW',
+        coll_data_id: caseId,
+        first_call_at: null // New case has no first call time yet
+      };
     }
 
     const collDataId = agentCase.coll_data_id;
 
-    // ONCE_PTP/ONCE_PRT constraint checks removed: allow multiple PTP/PRT submissions
-
     // ==========================================
-    // SAVE EDIT HISTORY
+    // 2. SAVE EDIT HISTORY
     // ==========================================
     if (isEdit) {
       const [[latest]] = await conn.query(
-        `SELECT disposition, remarks, promise_amount,
-                follow_up_date, follow_up_time, ptp_target
+        `SELECT disposition, remarks, promise_amount, follow_up_date, follow_up_time, ptp_target
          FROM agent_dispositions
-         WHERE agent_case_id = ?
-         ORDER BY created_at DESC
-         LIMIT 1
-         FOR UPDATE`,
+         WHERE agent_case_id = ? ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
         [agentCase.id]
       );
-
       if (latest) {
         await conn.query(
           `INSERT INTO agent_dispositions_edit_history
-           (agent_case_id, disposition, remarks, promise_amount,
-            follow_up_date, follow_up_time, ptp_target)
+           (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, ptp_target)
            VALUES (?, ?, ?, ?, ?, ?, ?)`,
-          [
-            agentCase.id,
-            latest.disposition,
-            latest.remarks,
-            latest.promise_amount,
-            latest.follow_up_date,
-            latest.follow_up_time,
-            latest.ptp_target,
-          ]
+          [agentCase.id, latest.disposition, latest.remarks, latest.promise_amount, latest.follow_up_date, latest.follow_up_time, latest.ptp_target]
         );
       }
     }
 
     // ==========================================
-    // INSERT DISPOSITION
+    // 3. INSERT DISPOSITION
     // ==========================================
     const [result] = await conn.query(
       `INSERT INTO agent_dispositions
-       (agent_case_id, agent_id, disposition, ptp_target,
-        remarks, promise_amount, follow_up_date,
-        follow_up_time, payment_date, created_at)
+       (agent_case_id, agent_id, disposition, ptp_target, remarks, promise_amount, follow_up_date, follow_up_time, payment_date, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
-      [
-        agentCase.id,
-        agentId,
-        disposition,
-        safePtpTarget,
-        remarks || null,
-        safePromiseAmount,
-        safeFollowUpDate,
-        safeFollowUpTime,
-        safePaymentDate,
-      ]
+      [agentCase.id, agentId, disposition, safePtpTarget, remarks || null, safePromiseAmount, safeFollowUpDate, safeFollowUpTime, safePaymentDate]
     );
 
     const insertedDispositionId = result.insertId;
     
-    // ==========================================
-    // NEW LOGIC: Add to customer_once_constraints for PTP/PRT only once
-    // ==========================================
+    // Constraints Logic
     if (disposition === 'PTP' || disposition === 'PRT') {
       const constraintType = disposition === 'PTP' ? 'ONCE_PTP' : 'ONCE_PRT';
-      // Check if already present for this customer and disposition
-      const [[existingConstraint]] = await conn.query(
-        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = ? AND is_active = 1 LIMIT 1`,
+      const [[exists]] = await conn.query(
+        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = ? AND is_active = 1`,
         [collDataId, constraintType]
       );
-      if (!existingConstraint) {
+      if (!exists) {
         await conn.query(
           `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active) VALUES (?, ?, ?, NOW(), 1)`,
           [collDataId, constraintType, insertedDispositionId]
@@ -454,37 +336,38 @@ export const submitDisposition = async (req, res) => {
     }
 
     // ==========================================
-    // ALWAYS UPDATE AGENT_CASE (FIXED)
+    // 4. UPDATE AGENT CASE (FIX: Explicit first_call_at)
     // ==========================================
     const newStatus = getResultStatus(disposition);
     const statusChanged = newStatus !== agentCase.status;
+
+    // FIX: Determine first_call_at in JS to be safe
+    // If it already has a value, keep it. If null, set it to NOW().
+    const finalFirstCallAt = agentCase.first_call_at ? agentCase.first_call_at : new Date();
 
     await conn.query(
       `UPDATE agent_cases
        SET
          status = ?,
          is_active = 0,
-         first_call_at = COALESCE(first_call_at, NOW()),
+         first_call_at = ?,
          last_call_at = NOW(),
          follow_up_date = ?,
          follow_up_time = ?
        WHERE id = ?`,
       [
         newStatus,
+        finalFirstCallAt, // Passed explicitly
         safeFollowUpDate,
         safeFollowUpTime,
         agentCase.id,
       ]
     );
 
-    // ==========================================
-    // RELEASE ONCE CONSTRAINTS WHEN DONE
-    // ==========================================
+    // Release constraints if done
     if (statusChanged && newStatus === "DONE") {
       await conn.query(
-        `UPDATE customer_once_constraints
-         SET is_active = 0
-         WHERE coll_data_id = ? AND is_active = 1`,
+        `UPDATE customer_once_constraints SET is_active = 0 WHERE coll_data_id = ? AND is_active = 1`,
         [collDataId]
       );
     }
@@ -500,10 +383,7 @@ export const submitDisposition = async (req, res) => {
   } catch (err) {
     await conn.rollback();
     console.error("submitDisposition error:", err);
-    return res.status(500).json({
-      message: "Failed to submit disposition",
-      error: err.message,
-    });
+    return res.status(500).json({ message: "Failed to submit disposition", error: err.message });
   } finally {
     conn.release();
   }
@@ -579,8 +459,8 @@ export const getNextCase = async (req, res) => {
 
 /**
  * POST /api/agent/search
- * Search any customer in the database by Loan ID, Name, or Phone
- * Automatically creates agent_case if none exists (for inbound calls)
+ * Search customers in campaigns allowed for this agent.
+ * Read-Only: Does NOT assign cases. Assignment happens on Disposition Submit.
  */
 export const searchCustomers = async (req, res) => {
   try {
@@ -593,80 +473,42 @@ export const searchCustomers = async (req, res) => {
 
     const searchTerm = `%${query}%`;
 
+    // Global Search restricted to Allowed Campaigns
     const [customers] = await pool.query(
       `
       SELECT
-        id,
-        loan_agreement_no,
-        cust_name,
-        mobileno,
-        appl_id,
-        branch_name,
-        hub_name,
-        amt_outst,
-        pos,
-        bom_bucket,
-        dpd,
-        loan_status,
-        res_addr,
-        created_at
-      FROM coll_data
-      WHERE (
-        loan_agreement_no LIKE ?
-        OR LOWER(cust_name) LIKE LOWER(?)
-        OR mobileno LIKE ?
+        c.id,
+        c.loan_agreement_no,
+        c.cust_name,
+        c.mobileno,
+        c.appl_id,
+        c.branch_name,
+        c.hub_name,
+        c.amt_outst,
+        c.pos,
+        c.bom_bucket,
+        c.dpd,
+        c.loan_status,
+        c.res_addr,
+        c.created_at,
+        c.agent_id, -- Return who currently owns it
+        CASE WHEN c.agent_id = ? THEN 1 ELSE 0 END as is_my_case
+      FROM coll_data c
+      INNER JOIN campaign_agents ca ON c.campaign_id = ca.campaign_id
+      WHERE ca.agent_id = ?
+      AND (
+        c.loan_agreement_no LIKE ?
+        OR c.cust_name LIKE ?
+        OR c.mobileno LIKE ?
       )
-      ORDER BY id DESC
+      ORDER BY c.id DESC
       LIMIT 50
       `,
-      [searchTerm, searchTerm, searchTerm]
+      [agentId, agentId, searchTerm, searchTerm, searchTerm]
     );
 
-    // For each customer, check if already assigned to THIS AGENT
-    // Only create case if NOT already assigned to this agent
-    const enrichedCustomers = await Promise.all(
-      customers.map(async (customer) => {
-        const [[existingCase]] = await pool.query(
-          `
-          SELECT id, is_active 
-          FROM agent_cases 
-          WHERE coll_data_id = ?
-          LIMIT 1
-          `,
-          [customer.id, agentId]
-        );
+    res.json({ data: customers, count: customers.length });
 
-        // Only create new case if this agent doesn't have an active case for this customer
-        if (!existingCase || !existingCase.is_active) {
-          // First check: is this customer assigned to ANY agent?
-          const [[assignedToAnyAgent]] = await pool.query(
-            `
-            SELECT id 
-            FROM agent_cases 
-            WHERE coll_data_id = ? 
-            LIMIT 1
-            `,
-            [customer.id]
-          );
-
-          // Only create case if NOT assigned to any other active agent
-          if (!assignedToAnyAgent) {
-            // Create new agent_case for this customer
-            await pool.query(
-              `
-              INSERT INTO agent_cases (agent_id, coll_data_id, status) 
-              VALUES (?, ?, 'NEW', 1)
-              `,
-              [agentId, customer.id]
-            );
-          }
-        }
-
-        return customer;
-      })
-    );
-
-    res.json({ data: enrichedCustomers, count: enrichedCustomers.length });
   } catch (err) {
     console.error("searchCustomers error:", err);
     res.status(500).json({ message: "Failed to search customers" });
@@ -676,39 +518,36 @@ export const searchCustomers = async (req, res) => {
 /**
  * GET /api/agent/analytics
  * Get performance analytics for logged-in agent with time filtering
- * Query params: timeFilter (today, yesterday, thisWeek, thisMonth, custom)
- *               fromDate (YYYY-MM-DD) - for custom filter
- *               toDate (YYYY-MM-DD) - for custom filter
  */
 export const getAgentAnalytics = async (req, res) => {
   try {
     const agentId = req.user.id;
     const { timeFilter = 'thisMonth', fromDate, toDate } = req.query;
 
-    // ✅ Validate custom date range
+    /* ==========================================
+       1. DATE HANDLING & VALIDATION
+       ========================================== */
+    
+    // Validate custom date range
     if (timeFilter === 'custom') {
       if (!fromDate || !toDate) {
         return res.status(400).json({ message: "fromDate and toDate required for custom range" });
       }
-
-      // Parse and validate dates
       const from = new Date(fromDate);
       const to = new Date(toDate);
 
       if (isNaN(from.getTime()) || isNaN(to.getTime())) {
         return res.status(400).json({ message: "Invalid date format. Use YYYY-MM-DD" });
       }
-
       if (from > to) {
         return res.status(400).json({ message: "fromDate must be <= toDate" });
       }
     }
 
-    // Calculate date range based on timeFilter
+    // Calculate Dynamic Date Range
     const today = new Date();
     let startDate = new Date();
     let endDate = new Date();
-
     endDate.setHours(23, 59, 59, 999);
 
     if (timeFilter === 'custom') {
@@ -727,7 +566,10 @@ export const getAgentAnalytics = async (req, res) => {
           endDate.setHours(23, 59, 59, 999);
           break;
         case 'thisWeek':
-          startDate.setDate(today.getDate() - today.getDay());
+          // Adjust to start of week (assuming Monday start, or use your preferred locale logic)
+          const day = today.getDay();
+          const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
+          startDate.setDate(diff); 
           startDate.setHours(0, 0, 0, 0);
           break;
         case 'thisMonth':
@@ -742,7 +584,7 @@ export const getAgentAnalytics = async (req, res) => {
     const startDateStr = startDate.toISOString();
     const endDateStr = endDate.toISOString();
 
-    // ✅ Calculate monthly date range (ALWAYS calendar month, independent of filter)
+    // Calculate Fixed Monthly Range (For Targets/Monthly Summary)
     const monthlyStart = new Date();
     monthlyStart.setDate(1);
     monthlyStart.setHours(0, 0, 0, 0);
@@ -755,121 +597,142 @@ export const getAgentAnalytics = async (req, res) => {
     const monthlyStartStr = monthlyStart.toISOString();
     const monthlyEndStr = monthlyEnd.toISOString();
 
-    // ✅ Fetch agent target for CURRENT MONTH (not campaign target)
-    // Build YYYY-MM from local date components to avoid timezone shifts
     const currentMonthStr = `${monthlyStart.getFullYear()}-${String(
       monthlyStart.getMonth() + 1
     ).padStart(2, '0')}`; // YYYY-MM
+
+    /* ==========================================
+       2. FETCH TARGETS
+       ========================================== */
     const [[agentTarget]] = await pool.query(
-      `
-      SELECT target_amount 
-      FROM agent_targets 
-      WHERE agent_id = ? AND month = ?
-      LIMIT 1
-      `,
+      `SELECT target_amount FROM agent_targets WHERE agent_id = ? AND month = ? LIMIT 1`,
       [agentId, currentMonthStr]
     );
-
     const targetAmount = agentTarget?.target_amount || null;
 
-    /* ===============================
-       SECTION A: Call & PTP Overview
-      // ==========================================
-      // 4️⃣ PROCESS DISPOSITION DATA
-      // ==========================================
-      await conn.query(
-        `
-        INSERT INTO agent_dispositions
+    /* ==========================================
+       SECTION A: COLLECTION BREAKDOWN & SUMMARY
+       Logic: 
+       1. Group cash by the customer's CURRENT status.
+       2. Sum ALL payments for that customer in the period.
+       ========================================== */
+    const [breakdownRows] = await pool.query(
+      `
+      SELECT 
+        latest_status.disposition, 
+        COUNT(DISTINCT latest_status.agent_case_id) AS customer_count, 
+        COALESCE(SUM(customer_totals.total_paid), 0) AS total_amount
+      FROM 
         (
-          agent_case_id,
-          agent_id,
-          disposition,
-          ptp_target,
-          remarks,
-          promise_amount,
-          follow_up_date,
-          follow_up_time,
-          created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
-        `,
-        [
-          agentCase.id,
-          agentId,
-          disposition,
-          safePtpTarget,
-          remarks || null,
-          safePromiseAmount,
-          safeFollowUpDate,
-          safeFollowUpTime,
-        ]
-      );
-      // ==========================================
-      // 4️⃣ PROCESS DISPOSITION DATA
-      // ==========================================
-      await conn.query(
-        `
-        INSERT INTO agent_dispositions
+          -- Subquery 1: Find the LATEST status for each customer in period
+          -- This determines if they are currently PIF, PRT, etc.
+          SELECT ad.agent_case_id, ad.disposition
+          FROM agent_dispositions ad
+          JOIN (
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions
+            WHERE agent_id = ? 
+              AND created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) latest 
+            ON latest.agent_case_id = ad.agent_case_id 
+            AND latest.latest_time = ad.created_at
+          WHERE ad.disposition IN ('PIF','SIF','FCL','PRT')
+        ) latest_status
+      JOIN 
         (
-          agent_case_id,
-          agent_id,
-          disposition,
-          ptp_target,
-          remarks,
-          promise_amount,
-          follow_up_date,
-          follow_up_time,
-          created_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NOW())
-        `,
-        [
-          agentCase.id,
-          agentId,
-          disposition,
-          safePtpTarget,
-          remarks || null,
-          safePromiseAmount,
-          safeFollowUpDate,
-          safeFollowUpTime,
-        ]
-      );
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-         AND latest.latest_time = ad.created_at
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+          -- Subquery 2: Calculate TOTAL CASH collected from that customer in period
+          -- This sums up 5000 + 10000 = 15000 regardless of dates
+          SELECT agent_case_id, SUM(promise_amount) as total_paid
+          FROM agent_dispositions
+          WHERE agent_id = ? 
+            AND created_at BETWEEN ? AND ?
+            AND disposition IN ('PIF','SIF','FCL','PRT')
+          GROUP BY agent_case_id
+        ) customer_totals 
+        ON customer_totals.agent_case_id = latest_status.agent_case_id
+      GROUP BY latest_status.disposition
+      `,
+      [agentId, startDateStr, endDateStr, agentId, startDateStr, endDateStr]
+    );
+
+    // Format Breakdown Object
+    const formattedBreakdown = {
+      PIF: { customer_count: 0, total_amount: 0 },
+      SIF: { customer_count: 0, total_amount: 0 },
+      FCL: { customer_count: 0, total_amount: 0 },
+      PRT: { customer_count: 0, total_amount: 0 },
+    };
+
+    let totalCollectedAmount = 0;
+    let totalCollectedCount = 0;
+
+    breakdownRows.forEach((item) => {
+      // Update Breakdown
+      if (formattedBreakdown[item.disposition]) {
+        formattedBreakdown[item.disposition] = {
+          customer_count: item.customer_count,
+          total_amount: item.total_amount,
+        };
+      }
+      // Calculate Totals for Summary
+      totalCollectedAmount += parseFloat(item.total_amount || 0);
+      totalCollectedCount += parseInt(item.customer_count || 0);
+    });
+
+    /* ==========================================
+       SECTION B: CALL ACTIVITY & PTP OVERVIEW
+       Logic: Count EVERY row to capture full agent effort.
+       ========================================== */
+    const [[ptpData]] = await pool.query(
+      `
+        SELECT 
+          COUNT(*) AS calls_attended,
+          SUM(CASE WHEN disposition = 'PTP' THEN 1 ELSE 0 END) AS ptp_count,
+          COALESCE(SUM(CASE WHEN disposition = 'PTP' THEN promise_amount ELSE 0 END), 0) AS total_ptp_amount
+        FROM agent_dispositions
+        WHERE agent_id = ?
+          AND created_at BETWEEN ? AND ?
       `,
       [agentId, startDateStr, endDateStr]
     );
 
-    /* ===============================
-       SECTION D: Monthly Summary (ALWAYS CALENDAR MONTH)
-       =============================== */
-    const [[monthlySummary]] = await pool.query(
+    /* ==========================================
+       SECTION C: MONTHLY SUMMARY (Calendar Month)
+       Logic: Same "Cash vs Status" logic as Section A, but fixed to Month dates.
+       ========================================== */
+    const [[monthlyActuals]] = await pool.query(
       `
-      SELECT
-        COUNT(*) AS total_collected_count,
-        COALESCE(SUM(promise_amount), 0) AS total_collected_amount
-      FROM (
-        SELECT ad.*
-        FROM agent_dispositions ad
-        JOIN (
-          SELECT agent_case_id, MAX(created_at) AS latest_time
+      SELECT 
+        COUNT(DISTINCT latest_status.agent_case_id) AS total_collected_count, 
+        COALESCE(SUM(customer_totals.total_paid), 0) AS total_collected_amount
+      FROM 
+        (
+          SELECT ad.agent_case_id
+          FROM agent_dispositions ad
+          JOIN (
+            SELECT agent_case_id, MAX(created_at) AS latest_time
+            FROM agent_dispositions
+            WHERE agent_id = ? AND created_at BETWEEN ? AND ?
+            GROUP BY agent_case_id
+          ) latest ON latest.agent_case_id = ad.agent_case_id AND latest.latest_time = ad.created_at
+          WHERE ad.disposition IN ('PIF','SIF','FCL','PRT')
+        ) latest_status
+      JOIN 
+        (
+          SELECT agent_case_id, SUM(promise_amount) as total_paid
           FROM agent_dispositions
-          WHERE agent_id = ?
+          WHERE agent_id = ? 
             AND created_at BETWEEN ? AND ?
+            AND disposition IN ('PIF','SIF','FCL','PRT')
           GROUP BY agent_case_id
-        ) latest
-          ON latest.agent_case_id = ad.agent_case_id
-         AND latest.latest_time = ad.created_at
-      ) latest_cases
-      WHERE disposition IN ('PIF','SIF','FCL','PRT')
+        ) customer_totals ON customer_totals.agent_case_id = latest_status.agent_case_id
       `,
-      [agentId, monthlyStartStr, monthlyEndStr]
+      [agentId, monthlyStartStr, monthlyEndStr, agentId, monthlyStartStr, monthlyEndStr]
     );
 
-    // Calculate monthly expected amount (PTP - RTP)
+    // Calculate Monthly Expected (Net PTP)
+    // Formula: Total PTP - Total RTP (Broken Promises)
     const [[monthlyExpected]] = await pool.query(
       `
       SELECT
@@ -885,112 +748,39 @@ export const getAgentAnalytics = async (req, res) => {
       [agentId, monthlyStartStr, monthlyEndStr]
     );
 
-
-    // Fetch collection breakdown from DB
-    const [collectionBreakdown] = await pool.query(
-      `
-        SELECT disposition, COUNT(DISTINCT agent_case_id) AS customer_count, COALESCE(SUM(promise_amount), 0) AS total_amount
-        FROM (
-          SELECT ad.*
-          FROM agent_dispositions ad
-          JOIN (
-            SELECT agent_case_id, MAX(created_at) AS latest_time
-            FROM agent_dispositions
-            WHERE agent_id = ?
-              AND created_at BETWEEN ? AND ?
-            GROUP BY agent_case_id
-          ) latest
-            ON latest.agent_case_id = ad.agent_case_id
-           AND latest.latest_time = ad.created_at
-        ) latest_cases
-        WHERE disposition IN ('PIF','SIF','FCL','PRT')
-        GROUP BY disposition
-      `,
-      [agentId, startDateStr, endDateStr]
-    );
-
-    // Format collection breakdown
-    const formattedBreakdown = {
-      PIF: { customer_count: 0, total_amount: 0 },
-      SIF: { customer_count: 0, total_amount: 0 },
-      FCL: { customer_count: 0, total_amount: 0 },
-      PRT: { customer_count: 0, total_amount: 0 },
-    };
-
-    collectionBreakdown.forEach((item) => {
-      formattedBreakdown[item.disposition] = {
-        customer_count: item.customer_count,
-        total_amount: item.total_amount,
-      };
-    });
-
-    // Calculate achievement percentage for monthly summary
-    const monthlyActual = monthlySummary.total_collected_amount || 0;
+    // Calculate Achievement %
+    const monthlyActualAmount = monthlyActuals?.total_collected_amount || 0;
     let achievementPercent = 0;
     if (targetAmount && targetAmount > 0) {
-      achievementPercent = ((monthlyActual / targetAmount) * 100).toFixed(2);
+      achievementPercent = ((monthlyActualAmount / targetAmount) * 100).toFixed(2);
     }
 
-    // Fetch PTP overview data
-    const [[ptpData]] = await pool.query(
-      `
-        SELECT 
-          COUNT(*) AS calls_attended,
-          SUM(CASE WHEN disposition = 'PTP' THEN 1 ELSE 0 END) AS ptp_count,
-          COALESCE(SUM(CASE WHEN disposition = 'PTP' THEN promise_amount ELSE 0 END), 0) AS total_ptp_amount
-        FROM agent_dispositions
-        WHERE agent_id = ?
-          AND created_at BETWEEN ? AND ?
-      `,
-      [agentId, startDateStr, endDateStr]
-    );
-
-    // Fetch collection summary for the filtered period
-    const [[collectionSummary]] = await pool.query(
-      `
-        SELECT COUNT(*) AS total_collected_count, COALESCE(SUM(promise_amount), 0) AS total_collected_amount
-        FROM (
-          SELECT ad.*
-          FROM agent_dispositions ad
-          JOIN (
-            SELECT agent_case_id, MAX(created_at) AS latest_time
-            FROM agent_dispositions
-            WHERE agent_id = ?
-              AND created_at BETWEEN ? AND ?
-            GROUP BY agent_case_id
-          ) latest
-            ON latest.agent_case_id = ad.agent_case_id
-           AND latest.latest_time = ad.created_at
-        ) latest_cases
-        WHERE disposition IN ('PIF','SIF','FCL','PRT')
-      `,
-      [agentId, startDateStr, endDateStr]
-    );
-
+    /* ==========================================
+       FINAL RESPONSE
+       ========================================== */
     res.json({
       timeFilter,
       dateRange: { start: startDateStr, end: endDateStr },
       overview: {
-        calls_attended: ptpData.calls_attended || 0,
-        ptp_count: ptpData.ptp_count || 0,
-        total_ptp_amount: ptpData.total_ptp_amount || 0,
+        calls_attended: ptpData?.calls_attended || 0,
+        ptp_count: ptpData?.ptp_count || 0,
+        total_ptp_amount: ptpData?.total_ptp_amount || 0,
       },
       breakdown: formattedBreakdown,
       summary: {
-        total_collected_count: collectionSummary?.total_collected_count || 0,
-        total_collected_amount: collectionSummary?.total_collected_amount || 0,
+        total_collected_count: totalCollectedCount,
+        total_collected_amount: totalCollectedAmount,
       },
-      // Monthly summary (ALWAYS calendar month, independent of filter)
-      // Now using agent_targets instead of campaign targets
       monthlySummary: {
         dateRange: { start: monthlyStartStr, end: monthlyEndStr },
-        total_collected_count: monthlySummary.total_collected_count || 0,
-        total_collected_amount: monthlyActual,
+        total_collected_count: monthlyActuals?.total_collected_count || 0,
+        total_collected_amount: monthlyActualAmount,
         expected_amount: monthlyExpected?.expected_amount || 0,
         target_amount: targetAmount,
         achievement_percent: targetAmount ? parseFloat(achievementPercent) : null,
       },
     });
+
   } catch (err) {
     console.error("getAgentAnalytics error:", err);
     res.status(500).json({ message: "Failed to fetch analytics" });

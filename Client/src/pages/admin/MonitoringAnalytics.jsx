@@ -5,12 +5,25 @@ import {
   fetchMonitoringAgents,
   fetchMonitoringCampaigns,
 } from "@/api/adminApi";
+import { 
+  Calendar, 
+  Filter, 
+  Phone, 
+  Users, 
+  Banknote, 
+  TrendingUp, 
+  CheckCircle2, 
+  AlertCircle, 
+  PieChart, 
+  BarChart3,
+  Loader2
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
+import AdminNavbar from "../../components/AdminNavbar";
 
 const MonitoringAnalytics = () => {
   const { token } = useAuth();
 
-  // ISSUE #5 FIX: Use arrays for multi-select instead of single values
   const [selectedCampaignIds, setSelectedCampaignIds] = useState([]);
   const [selectedAgentIds, setSelectedAgentIds] = useState([]);
   const [startDate, setStartDate] = useState("");
@@ -184,8 +197,9 @@ const MonitoringAnalytics = () => {
   const { overview = {}, breakdown = {}, summary = {}, monthlySummary = {} } = analytics || {};
 
   return (
-    <div className="p-6 bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
-      <div className="max-w-7xl mx-auto">
+    <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+      <AdminNavbar/>
+      <div className="p-6 max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-slate-900 mb-2">
