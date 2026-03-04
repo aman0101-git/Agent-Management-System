@@ -45,7 +45,16 @@ export const getAgentCases = async (req, res) => {
         ac.first_call_at,
         ac.last_call_at,
         ac.follow_up_date,
-        ac.follow_up_time
+        ac.follow_up_time,
+
+        -- Fetch the latest disposition for this case
+        (
+          SELECT disposition 
+          FROM agent_dispositions ad 
+          WHERE ad.agent_case_id = ac.id 
+          ORDER BY created_at DESC 
+          LIMIT 1
+        ) AS latest_disposition
 
       FROM coll_data c
       
@@ -211,7 +220,7 @@ export const getAgentCaseById = async (req, res) => {
 
 /**
  * POST /api/agent/cases/:caseId/disposition
- * Submit or edit disposition with First Call logic fix
+ * Submit or edit disposition with First Call logic fix and Constraint Duplicate Fix
  */
 export const submitDisposition = async (req, res) => {
   const conn = await pool.getConnection();
@@ -221,8 +230,14 @@ export const submitDisposition = async (req, res) => {
     const { caseId } = req.params;
 
     const {
-      disposition, remarks, promiseAmount, followUpDate,
-      followUpTime, ptpTarget, paymentDate, isEdit,
+      disposition,
+      remarks,
+      promiseAmount,
+      followUpDate,
+      followUpTime,
+      ptpTarget,
+      paymentDate,
+      isEdit,
     } = req.body;
 
     // --- Validation (Keep existing logic) ---
@@ -320,23 +335,28 @@ export const submitDisposition = async (req, res) => {
 
     const insertedDispositionId = result.insertId;
     
-    // Constraints Logic
+    // ==========================================
+    // 4. CONSTRAINT LOGIC (FIXED)
+    // ==========================================
     if (disposition === 'PTP' || disposition === 'PRT') {
       const constraintType = disposition === 'PTP' ? 'ONCE_PTP' : 'ONCE_PRT';
-      const [[exists]] = await conn.query(
-        `SELECT id FROM customer_once_constraints WHERE coll_data_id = ? AND constraint_type = ? AND is_active = 1`,
-        [collDataId, constraintType]
+      
+      // FIX: Use UPSERT (Insert or Update) to handle duplicates safely
+      // If row exists (inactive), it reactivates it. If not, it inserts new.
+      await conn.query(
+        `INSERT INTO customer_once_constraints 
+           (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active) 
+         VALUES (?, ?, ?, NOW(), 1)
+         ON DUPLICATE KEY UPDATE 
+           triggered_disposition_id = VALUES(triggered_disposition_id),
+           triggered_at = NOW(),
+           is_active = 1`,
+        [collDataId, constraintType, insertedDispositionId]
       );
-      if (!exists) {
-        await conn.query(
-          `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active) VALUES (?, ?, ?, NOW(), 1)`,
-          [collDataId, constraintType, insertedDispositionId]
-        );
-      }
     }
 
     // ==========================================
-    // 4. UPDATE AGENT CASE (FIX: Explicit first_call_at)
+    // 5. UPDATE AGENT CASE (FIX: Explicit first_call_at)
     // ==========================================
     const newStatus = getResultStatus(disposition);
     const statusChanged = newStatus !== agentCase.status;
@@ -367,7 +387,7 @@ export const submitDisposition = async (req, res) => {
     // Release constraints if done
     if (statusChanged && newStatus === "DONE") {
       await conn.query(
-        `UPDATE customer_once_constraints SET is_active = 0 WHERE coll_data_id = ? AND is_active = 1`,
+        `UPDATE customer_once_constraints SET is_active = 0 WHERE coll_data_id = ?`,
         [collDataId]
       );
     }

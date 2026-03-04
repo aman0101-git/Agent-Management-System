@@ -30,37 +30,43 @@ export const ingestLoans = async (req, res) => {
     if (!campaign_id) return res.status(400).json({ message: "Campaign ID is required" });
     if (!req.file) return res.status(400).json({ message: "No file uploaded" });
 
+    // 1. Get Connection & Start Transaction
     conn = await pool.getConnection();
     await conn.beginTransaction();
 
-    // 1. Verify Campaign
+    // 2. Verify Campaign
     const [[campaign]] = await conn.query(
       "SELECT id FROM campaigns WHERE id = ? AND status = 'ACTIVE'",
       [campaign_id]
     );
     if (!campaign) throw new Error("Invalid or inactive campaign");
 
-    // 2. Read Excel
+    // 3. Read Excel
     const workbook = xlsx.read(req.file.buffer, { type: "buffer", cellDates: true });
     const sheet = workbook.Sheets[workbook.SheetNames[0]];
     const rawRows = xlsx.utils.sheet_to_json(sheet);
 
     if (!rawRows.length) throw new Error("Excel file is empty");
 
-    // 3. Validate Headers
+    // 4. Validate Headers
     const headers = Object.keys(rawRows[0]);
     validateHeaders(headers);
 
-    // 4. Prepare Batch Data
-    const BATCH_SIZE = 1000;
+    // 5. Prepare Batch Data
+    // FIX 1: Reduced Batch Size to prevent Packet Too Large / Timeouts
+    const BATCH_SIZE = 500; 
+    
     const month = new Date().getMonth() + 1;
     const year = new Date().getFullYear();
     const chunkedValues = [];
 
+    // FIX 2: Convert Set to Array once to guarantee Order of Insertion matches Order of Values
+    const schemaColsArray = Array.from(DB_SCHEMA_COLUMNS);
+
     // Columns for INSERT
     const INSERT_COLS = [
       "campaign_id", "batch_month", "batch_year", "is_active", "extra_fields", 
-      ...Array.from(DB_SCHEMA_COLUMNS)
+      ...schemaColsArray
     ];
 
     for (const row of rawRows) {
@@ -74,6 +80,8 @@ export const ingestLoans = async (req, res) => {
         if (!normalizedKey) continue;
 
         let dbColumn = mapHeader(key);
+        
+        // If mapHeader returns null, check if the normalized key exists in schema directly
         if (!dbColumn && DB_SCHEMA_COLUMNS.has(normalizedKey)) {
           dbColumn = normalizedKey;
         }
@@ -98,21 +106,21 @@ export const ingestLoans = async (req, res) => {
         JSON.stringify(extraFields)
       ];
 
-      for (const col of DB_SCHEMA_COLUMNS) {
+      // Use the Array here to ensure order matches INSERT_COLS exactly
+      for (const col of schemaColsArray) {
         rowArray.push(cleanRecord[col] !== undefined ? cleanRecord[col] : null);
       }
 
       chunkedValues.push(rowArray);
     }
 
-    // 5. SMART BULK UPSERT (Insert or Update)
-    // We construct the ON DUPLICATE KEY UPDATE clause dynamically
-    // We do NOT update 'campaign_id' or 'agent_id' to preserve assignment history
-    const updateClauses = Array.from(DB_SCHEMA_COLUMNS)
+    // 6. SMART BULK UPSERT
+    // Create ON DUPLICATE KEY UPDATE clause
+    // We use the same schemaColsArray to ensure we update the correct columns
+    const updateClauses = schemaColsArray
       .map(col => `${col} = VALUES(${col})`)
       .join(", ");
 
-    // We also update batch info and extra_fields
     const fullUpdateClause = `
       batch_month = VALUES(batch_month),
       batch_year = VALUES(batch_year),
@@ -120,18 +128,20 @@ export const ingestLoans = async (req, res) => {
       ${updateClauses}
     `;
 
+    // 7. Execute in Batches
     let totalProcessed = 0;
+    
+    // Pre-construct SQL to avoid rebuilding string in loop
+    const sql = `
+      INSERT INTO coll_data 
+      (${INSERT_COLS.join(", ")}) 
+      VALUES ?
+      ON DUPLICATE KEY UPDATE
+      ${fullUpdateClause}
+    `;
+
     for (let i = 0; i < chunkedValues.length; i += BATCH_SIZE) {
       const batch = chunkedValues.slice(i, i + BATCH_SIZE);
-      
-      const sql = `
-        INSERT INTO coll_data 
-        (${INSERT_COLS.join(", ")}) 
-        VALUES ?
-        ON DUPLICATE KEY UPDATE
-        ${fullUpdateClause}
-      `;
-
       await conn.query(sql, [batch]);
       totalProcessed += batch.length;
     }
@@ -140,15 +150,36 @@ export const ingestLoans = async (req, res) => {
     
     res.status(201).json({
       success: true,
-      message: `Processed ${totalProcessed} loans. Duplicates were updated, new loans inserted.`,
+      message: `Processed ${totalProcessed} loans. Duplicates updated, new loans inserted.`,
       rowsUploaded: totalProcessed,
     });
 
   } catch (err) {
-    if (conn) await conn.rollback();
-    console.error("Ingestion Error:", err);
-    res.status(500).json({ message: err.message || "Internal Server Error" });
+    // FIX 3: Robust Error Logging & Safe Rollback
+    // Log the actual error causing the failure
+    console.error("CRITICAL INGESTION ERROR:", err);
+
+    if (conn) {
+      try {
+        await conn.rollback();
+      } catch (rollbackErr) {
+        // This catches the 'ECONNRESET' if the connection is already dead
+        console.error("Rollback failed (Connection likely dead):", rollbackErr.message);
+      }
+    }
+    
+    // Return the original error message to the client
+    res.status(500).json({ 
+      message: err.message || "Internal Server Error",
+      details: err.code || "Unknown SQL Error"
+    });
   } finally {
-    if (conn) conn.release();
+    if (conn) {
+      try {
+        conn.release();
+      } catch (releaseErr) {
+        console.error("Connection release failed:", releaseErr.message);
+      }
+    }
   }
 };
