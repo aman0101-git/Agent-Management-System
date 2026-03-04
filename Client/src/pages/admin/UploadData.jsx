@@ -92,6 +92,11 @@ const UploadData = () => {
         ? `${rowsUploaded} rows uploaded successfully`
         : res.data.message || "Upload completed";
       setMessage(successMsg);
+
+      setTimeout(() => {
+        navigate("/admin/dashboard");
+      }, 1000);
+      
     } catch (err) {
       setError(err?.response?.data?.message || err?.message || "Upload failed");
     } finally {
