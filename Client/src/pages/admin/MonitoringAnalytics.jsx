@@ -5,6 +5,7 @@ import {
   fetchMonitoringAgents,
   fetchMonitoringCampaigns,
   fetchMonitoringDrilldown,
+  fetchMonitoringDrilldownExport,
 } from "@/api/adminApi";
 import { 
   Calendar, 
@@ -18,7 +19,8 @@ import {
   PieChart, 
   BarChart3,
   Loader2,
-  X
+  X,
+  Download
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AdminNavbar from "../../components/AdminNavbar";
@@ -43,7 +45,12 @@ const MonitoringAnalytics = () => {
   const [drilldownLoading, setDrilldownLoading] = useState(false);
   const [drilldownData, setDrilldownData] = useState([]);
   const [drilldownTitle, setDrilldownTitle] = useState("");
-  const [selectedDisposition, setSelectedDisposition] = useState(""); // <--- Added to track what type of date to show
+  const [selectedDisposition, setSelectedDisposition] = useState("");
+
+  // NEW STATES FOR EXPORT
+  const [isExporting, setIsExporting] = useState(false);
+  const [drilldownStartDate, setDrilldownStartDate] = useState("");
+  const [drilldownEndDate, setDrilldownEndDate] = useState("");
 
   // Initialize dates to current calendar month
   useEffect(() => {
@@ -148,9 +155,14 @@ const MonitoringAnalytics = () => {
   };
 
   const handleDrilldownClick = async (disposition, overrideStartDate = null, overrideEndDate = null) => {
+    const activeStartDate = overrideStartDate || startDate;
+    const activeEndDate = overrideEndDate || endDate;
+
     setIsDrilldownOpen(true);
     setDrilldownTitle(disposition === "TOTAL_COLLECTED" ? "Total Collected Customers List" : `${disposition} Customers List`);
     setSelectedDisposition(disposition);
+    setDrilldownStartDate(activeStartDate); // Track exact date used
+    setDrilldownEndDate(activeEndDate);     // Track exact date used
     setDrilldownLoading(true);
     setDrilldownData([]);
 
@@ -159,8 +171,8 @@ const MonitoringAnalytics = () => {
         disposition,
         getCampaignFilterParam(),
         getAgentFilterParam(),
-        overrideStartDate || startDate,
-        overrideEndDate || endDate,
+        activeStartDate,
+        activeEndDate,
         token
       );
       setDrilldownData(data || []);
@@ -168,6 +180,32 @@ const MonitoringAnalytics = () => {
       console.error("Failed to fetch drilldown data:", err);
     } finally {
       setDrilldownLoading(false);
+    }
+  };
+
+  const handleExportCSV = async () => {
+    setIsExporting(true);
+    try {
+      const blob = await fetchMonitoringDrilldownExport(
+        selectedDisposition,
+        getCampaignFilterParam(),
+        getAgentFilterParam(),
+        drilldownStartDate, // Uses the exact date the modal was opened with
+        drilldownEndDate,
+        token
+      );
+      
+      const url = window.URL.createObjectURL(new Blob([blob]));
+      const link = document.createElement("a");
+      link.href = url;
+      link.setAttribute("download", `${selectedDisposition}_Customers.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (err) {
+      console.error("Failed to export CSV:", err);
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -737,12 +775,22 @@ const MonitoringAnalytics = () => {
             {/* Modal Header */}
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <h3 className="text-lg font-bold text-slate-800">{drilldownTitle}</h3>
-              <button 
-                onClick={() => setIsDrilldownOpen(false)}
-                className="text-slate-500 hover:text-slate-800 bg-slate-200 hover:bg-slate-300 rounded-full p-1 transition"
-              >
-                <X className="w-5 h-5" />
-              </button>
+              <div className="flex items-center gap-4">
+                <Button 
+                  onClick={handleExportCSV} 
+                  disabled={drilldownLoading || isExporting || drilldownData.length === 0}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white flex items-center gap-2 h-9 px-4 text-sm"
+                >
+                  {isExporting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  {isExporting ? "Exporting..." : "Export CSV"}
+                </Button>
+                <button 
+                  onClick={() => setIsDrilldownOpen(false)}
+                  className="text-slate-500 hover:text-slate-800 bg-slate-200 hover:bg-slate-300 rounded-full p-1 transition"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
 
             {/* Modal Body */}

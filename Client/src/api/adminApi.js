@@ -76,3 +76,31 @@ export const fetchMonitoringDrilldown = async (
 
   return res.data.data;
 };
+
+// Export detailed customer list to CSV
+export const fetchMonitoringDrilldownExport = async (
+  disposition,
+  campaignId = "ALL",
+  agentId = "ALL",
+  startDate,
+  endDate,
+  token
+) => {
+  const params = {
+    disposition,
+    campaign_id: campaignId,
+    agent_id: agentId,
+    start_date: startDate,
+    end_date: endDate,
+  };
+
+  const res = await axios.get(`${API_BASE}/monitoring-analytics/drilldown/export`, {
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+    responseType: 'blob',
+  });
+
+  return res.data;
+};
