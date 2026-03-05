@@ -16,6 +16,7 @@ import {
   getMonitoringAnalytics,
   getMonitoringAgents,
   getMonitoringCampaigns,
+  getMonitoringDrilldown,
 } from '../controllers/adminMonitoringController.js';
 
 import { exportSingleTable } from "../controllers/adminController.js";
@@ -120,6 +121,17 @@ router.get(
   protect,
   allowRoles('ADMIN'),
   getMonitoringCampaigns
+);
+
+/**
+ * GET /api/admin/monitoring-analytics/drilldown
+ * Get detailed list of customers for a specific disposition
+ */
+router.get(
+  '/monitoring-analytics/drilldown',
+  protect,
+  allowRoles('ADMIN'),
+  getMonitoringDrilldown
 );
 
 export default router;
