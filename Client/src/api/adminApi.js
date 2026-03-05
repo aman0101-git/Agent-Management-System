@@ -49,3 +49,30 @@ export const fetchMonitoringCampaigns = async (token) => {
 
   return res.data.campaigns;
 };
+
+// Fetch detailed customer list for a specific disposition
+export const fetchMonitoringDrilldown = async (
+  disposition,
+  campaignId = "ALL",
+  agentId = "ALL",
+  startDate,
+  endDate,
+  token
+) => {
+  const params = {
+    disposition,
+    campaign_id: campaignId,
+    agent_id: agentId,
+    start_date: startDate,
+    end_date: endDate,
+  };
+
+  const res = await axios.get(`${API_BASE}/monitoring-analytics/drilldown`, {
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data.data;
+};

@@ -4,6 +4,7 @@ import {
   fetchMonitoringAnalytics,
   fetchMonitoringAgents,
   fetchMonitoringCampaigns,
+  fetchMonitoringDrilldown,
 } from "@/api/adminApi";
 import { 
   Calendar, 
@@ -16,7 +17,8 @@ import {
   AlertCircle, 
   PieChart, 
   BarChart3,
-  Loader2
+  Loader2,
+  X
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import AdminNavbar from "../../components/AdminNavbar";
@@ -36,6 +38,13 @@ const MonitoringAnalytics = () => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Drilldown Modal State
+  const [isDrilldownOpen, setIsDrilldownOpen] = useState(false);
+  const [drilldownLoading, setDrilldownLoading] = useState(false);
+  const [drilldownData, setDrilldownData] = useState([]);
+  const [drilldownTitle, setDrilldownTitle] = useState("");
+  const [selectedDisposition, setSelectedDisposition] = useState(""); // <--- Added to track what type of date to show
+
   // Initialize dates to current calendar month
   useEffect(() => {
     const today = new Date();
@@ -48,7 +57,6 @@ const MonitoringAnalytics = () => {
     setEndDate(formatDate(lastDay));
   }, []);
 
-  // Handle date filter presets (calculate and set dates in frontend)
   const handleDateFilterChange = (filter) => {
     setDateFilter(filter);
     const today = new Date();
@@ -75,7 +83,6 @@ const MonitoringAnalytics = () => {
         end = new Date(today.getFullYear(), today.getMonth() + 1, 0);
         break;
       case "custom":
-        // Do not change dates, allow manual input
         return;
       default:
         return;
@@ -85,7 +92,6 @@ const MonitoringAnalytics = () => {
     setEndDate(formatDate(end));
   };
 
-  // Fetch agents and campaigns on mount
   useEffect(() => {
     const loadFilterOptions = async () => {
       try {
@@ -105,7 +111,6 @@ const MonitoringAnalytics = () => {
     loadFilterOptions();
   }, [token]);
 
-  // Load analytics on mount with default calendar month
   useEffect(() => {
     if (startDate && endDate && token) {
       loadAnalytics();
@@ -139,6 +144,30 @@ const MonitoringAnalytics = () => {
       setError(err.response?.data?.message || "Failed to load analytics");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDrilldownClick = async (disposition, overrideStartDate = null, overrideEndDate = null) => {
+    setIsDrilldownOpen(true);
+    setDrilldownTitle(disposition === "TOTAL_COLLECTED" ? "Total Collected Customers List" : `${disposition} Customers List`);
+    setSelectedDisposition(disposition);
+    setDrilldownLoading(true);
+    setDrilldownData([]);
+
+    try {
+      const data = await fetchMonitoringDrilldown(
+        disposition,
+        getCampaignFilterParam(),
+        getAgentFilterParam(),
+        overrideStartDate || startDate,
+        overrideEndDate || endDate,
+        token
+      );
+      setDrilldownData(data || []);
+    } catch (err) {
+      console.error("Failed to fetch drilldown data:", err);
+    } finally {
+      setDrilldownLoading(false);
     }
   };
 
@@ -197,7 +226,7 @@ const MonitoringAnalytics = () => {
   const { overview = {}, breakdown = {}, summary = {}, monthlySummary = {} } = analytics || {};
 
   return (
-    <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen">
+    <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen relative">
       <AdminNavbar/>
       <div className="p-6 max-w-7xl mx-auto">
         {/* Header */}
@@ -214,7 +243,6 @@ const MonitoringAnalytics = () => {
         <div className="bg-white rounded-lg shadow-md p-6 mb-8">
           <p className="text-sm font-semibold text-slate-900 mb-4">Filters</p>
 
-          {/* DATE PRESET BUTTONS */}
           <div className="mb-6 flex gap-2 flex-wrap">
             <button
               onClick={() => handleDateFilterChange("today")}
@@ -268,7 +296,6 @@ const MonitoringAnalytics = () => {
             </button>
           </div>
 
-          {/* Date Inputs: Only visible when Custom is selected */}
           {dateFilter === "custom" && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
               <div>
@@ -296,10 +323,7 @@ const MonitoringAnalytics = () => {
             </div>
           )}
 
-
-          {/* Campaigns, Agents, and Apply Filter in one row with scrollable containers */}
           <div className="flex flex-col md:flex-row gap-4 items-start mb-6">
-            {/* Campaigns */}
             <div className="flex-1 min-w-[180px]">
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-medium text-slate-700">Campaigns</label>
@@ -328,7 +352,6 @@ const MonitoringAnalytics = () => {
               </div>
             </div>
 
-            {/* Agents */}
             <div className="flex-1 min-w-[180px]">
               <div className="flex items-center justify-between mb-2">
                 <label className="block text-sm font-medium text-slate-700">Agents</label>
@@ -357,7 +380,6 @@ const MonitoringAnalytics = () => {
               </div>
             </div>
 
-            {/* Apply Button */}
             <div className="flex items-end pb-2">
               <Button
                 onClick={loadAnalytics}
@@ -389,19 +411,7 @@ const MonitoringAnalytics = () => {
                 </p>
               </div>
               <div className="bg-blue-100 rounded-full p-3">
-                <svg
-                  className="w-6 h-6 text-blue-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z"
-                  />
-                </svg>
+                <Phone className="w-6 h-6 text-blue-600" />
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-3">
@@ -409,7 +419,10 @@ const MonitoringAnalytics = () => {
             </p>
           </div>
 
-          <div className="bg-white rounded-lg shadow-md p-6">
+          <div 
+            onClick={() => handleDrilldownClick("PTP")}
+            className="bg-white rounded-lg shadow-md p-6 cursor-pointer hover:shadow-lg hover:ring-2 ring-purple-400 transition-all"
+          >
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-medium text-slate-600 mb-1">
@@ -420,23 +433,11 @@ const MonitoringAnalytics = () => {
                 </p>
               </div>
               <div className="bg-purple-100 rounded-full p-3">
-                <svg
-                  className="w-6 h-6 text-purple-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
+                <Users className="w-6 h-6 text-purple-600" />
               </div>
             </div>
-            <p className="text-xs text-slate-500 mt-3">
-              Customers with promise
+            <p className="text-xs text-purple-500 mt-3 font-medium">
+              Click to view details &rarr;
             </p>
           </div>
 
@@ -451,19 +452,7 @@ const MonitoringAnalytics = () => {
                 </p>
               </div>
               <div className="bg-amber-100 rounded-full p-3">
-                <svg
-                  className="w-6 h-6 text-amber-600"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
-                  />
-                </svg>
+                <Banknote className="w-6 h-6 text-amber-600" />
               </div>
             </div>
             <p className="text-xs text-slate-500 mt-3">
@@ -489,16 +478,17 @@ const MonitoringAnalytics = () => {
                 total_amount: 0,
               };
               const colorClasses = {
-                blue: "bg-blue-50 border-blue-200 text-blue-700",
-                green: "bg-green-50 border-green-200 text-green-700",
-                purple: "bg-purple-50 border-purple-200 text-purple-700",
-                orange: "bg-orange-50 border-orange-200 text-orange-700",
+                blue: "bg-blue-50 border-blue-200 text-blue-700 hover:ring-blue-400",
+                green: "bg-green-50 border-green-200 text-green-700 hover:ring-green-400",
+                purple: "bg-purple-50 border-purple-200 text-purple-700 hover:ring-purple-400",
+                orange: "bg-orange-50 border-orange-200 text-orange-700 hover:ring-orange-400",
               };
 
               return (
                 <div
                   key={key}
-                  className={`border-2 rounded-lg p-4 ${colorClasses[color]}`}
+                  onClick={() => handleDrilldownClick(key)}
+                  className={`border-2 rounded-lg p-4 cursor-pointer hover:shadow-md transition-all ${colorClasses[color]}`}
                 >
                   <p className="font-semibold text-sm mb-3">{label}</p>
                   <div className="space-y-2">
@@ -527,15 +517,18 @@ const MonitoringAnalytics = () => {
             Total Collection Summary
           </h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-6 border border-green-200">
+            <div 
+              onClick={() => handleDrilldownClick("TOTAL_COLLECTED")}
+              className="bg-gradient-to-br from-green-50 to-green-100 rounded-lg p-6 border border-green-200 cursor-pointer hover:shadow-lg hover:ring-2 ring-green-400 transition-all"
+            >
               <p className="text-sm font-medium text-green-700 mb-2">
                 Total Collected Customers
               </p>
               <p className="text-5xl font-bold text-green-900">
                 {summary.total_collected_count || 0}
               </p>
-              <p className="text-xs text-green-700 mt-2">
-                Successfully resolved cases
+              <p className="text-xs text-green-700 mt-2 font-medium">
+                Click to view details &rarr;
               </p>
             </div>
 
@@ -552,7 +545,6 @@ const MonitoringAnalytics = () => {
             </div>
           </div>
 
-          {/* Comparison Section */}
           <div className="mt-8 pt-8 border-t border-slate-200">
             <h3 className="text-lg font-semibold text-slate-900 mb-4">
               Expected vs Actual
@@ -577,7 +569,6 @@ const MonitoringAnalytics = () => {
               </div>
             </div>
 
-            {/* Collection Rate */}
             <div className="mt-6 p-4 bg-slate-50 rounded-lg border border-slate-200">
               <p className="text-sm text-slate-700 font-medium mb-3">
                 Collection Achievement Rate
@@ -628,12 +619,23 @@ const MonitoringAnalytics = () => {
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-              <div className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-6 border border-blue-200">
+              <div 
+                onClick={() => {
+                  const today = new Date();
+                  const firstDay = new Date(today.getFullYear(), today.getMonth(), 1).toISOString().split("T")[0];
+                  const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0).toISOString().split("T")[0];
+                  handleDrilldownClick("TOTAL_COLLECTED", firstDay, lastDay);
+                }}
+                className="bg-gradient-to-br from-blue-50 to-blue-100 rounded-lg p-6 border border-blue-200 cursor-pointer hover:shadow-lg hover:ring-2 ring-blue-400 transition-all"
+              >
                 <p className="text-sm font-medium text-blue-700 mb-2">
                   Customers Collected (This Month)
                 </p>
                 <p className="text-4xl font-bold text-blue-900">
                   {monthlySummary.total_collected_count || 0}
+                </p>
+                <p className="text-xs text-blue-700 mt-2 font-medium">
+                  Click to view details &rarr;
                 </p>
               </div>
 
@@ -658,7 +660,6 @@ const MonitoringAnalytics = () => {
               </div>
             </div>
 
-            {/* Monthly Achievement */}
             {monthlySummary.target_amount && (
               <div className="mt-6 p-6 bg-slate-50 rounded-lg border border-slate-200">
                 <p className="text-sm text-slate-700 font-medium mb-4">
@@ -728,6 +729,102 @@ const MonitoringAnalytics = () => {
           </div>
         )}
       </div>
+
+      {/* DRILLDOWN MODAL */}
+      {isDrilldownOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-5xl max-h-[90vh] flex flex-col overflow-hidden">
+            {/* Modal Header */}
+            <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
+              <h3 className="text-lg font-bold text-slate-800">{drilldownTitle}</h3>
+              <button 
+                onClick={() => setIsDrilldownOpen(false)}
+                className="text-slate-500 hover:text-slate-800 bg-slate-200 hover:bg-slate-300 rounded-full p-1 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 overflow-y-auto flex-1">
+              {drilldownLoading ? (
+                <div className="flex flex-col items-center justify-center py-12">
+                  <Loader2 className="w-8 h-8 text-blue-600 animate-spin mb-4" />
+                  <p className="text-slate-500">Fetching customer details...</p>
+                </div>
+              ) : drilldownData.length === 0 ? (
+                <div className="text-center py-12 text-slate-500">
+                  No customers found for this disposition in the selected range.
+                </div>
+              ) : (
+                <div className="overflow-x-auto border rounded-lg shadow-sm">
+                  <table className="w-full text-sm text-left">
+                    <thead className="bg-slate-100 text-slate-700 font-semibold border-b">
+                      <tr>
+                        {/* REARRANGED COLUMNS */}
+                        <th className="px-4 py-3 whitespace-nowrap">Customer Name</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Loan Agreement No</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Contact No</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Agent Name</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Campaign</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Disposition</th>
+                        <th className="px-4 py-3 whitespace-nowrap">Amount</th>
+                        {/* CONDITIONAL DATE HEADER */}
+                        <th className="px-4 py-3 whitespace-nowrap">
+                          {["PRT", "FCL", "SIF", "PIF", "TOTAL_COLLECTED"].includes(selectedDisposition) 
+                            ? "Payment Date" 
+                            : "Follow Up Date & Time"}
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {drilldownData.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-slate-50">
+                          <td className="px-4 py-3 text-slate-800 font-medium">{row.customer_name || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.loan_agreement_no || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.customer_no || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.agent_name || "-"}</td>
+                          <td className="px-4 py-3 text-slate-600">{row.campaign_name || "N/A"}</td>
+                          <td className="px-4 py-3">
+                            <span className="bg-slate-100 text-slate-800 px-2 py-1 rounded text-xs font-semibold">
+                              {row.latest_disposition}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-medium text-emerald-600">
+                            {row.amount ? formatCurrency(row.amount) : "-"}
+                          </td>
+                          <td className="px-4 py-3 text-slate-600">
+                            {/* CONDITIONAL DATE RENDERING */}
+                            {["PRT", "FCL", "SIF", "PIF", "TOTAL_COLLECTED"].includes(selectedDisposition) ? (
+                              <span>
+                                {row.payment_date 
+                                  ? new Date(row.payment_date).toLocaleDateString() 
+                                  : "-"}
+                              </span>
+                            ) : (
+                              <div className="flex flex-col">
+                                <span>
+                                  {row.follow_up_date 
+                                    ? new Date(row.follow_up_date).toLocaleDateString() 
+                                    : "-"}
+                                </span>
+                                <span className="text-xs text-slate-400">
+                                  {row.follow_up_time || ""}
+                                </span>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
