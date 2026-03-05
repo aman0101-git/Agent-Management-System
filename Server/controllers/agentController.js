@@ -878,3 +878,101 @@ export const setAgentTarget = async (req, res) => {
     res.status(500).json({ message: "Failed to set target" });
   }
 };
+
+/* ==========================================
+   GET AGENT DRILLDOWN
+   Fetch specific customer list for a disposition
+   ========================================== */
+export const getAgentDrilldown = async (req, res) => {
+  try {
+    const agentId = req.user.id;
+    const { disposition, timeFilter = 'thisMonth', fromDate, toDate } = req.query;
+
+    if (!disposition) {
+      return res.status(400).json({ message: "Disposition is required" });
+    }
+
+    // 1. Calculate Date Range (Matches Agent Analytics logic)
+    const today = new Date();
+    let startDate = new Date();
+    let endDate = new Date();
+    endDate.setHours(23, 59, 59, 999);
+
+    if (timeFilter === 'custom') {
+      startDate = new Date(fromDate);
+      endDate = new Date(toDate);
+      endDate.setHours(23, 59, 59, 999);
+    } else {
+      switch (timeFilter) {
+        case 'today':
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'yesterday':
+          startDate.setDate(today.getDate() - 1);
+          startDate.setHours(0, 0, 0, 0);
+          endDate.setDate(today.getDate() - 1);
+          endDate.setHours(23, 59, 59, 999);
+          break;
+        case 'thisWeek':
+          const day = today.getDay();
+          const diff = today.getDate() - day + (day === 0 ? -6 : 1); 
+          startDate.setDate(diff); 
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        case 'thisMonth':
+          startDate.setDate(1);
+          startDate.setHours(0, 0, 0, 0);
+          break;
+        default:
+          startDate.setHours(0, 0, 0, 0);
+      }
+    }
+
+    const startDateStr = startDate.toISOString();
+    const endDateStr = endDate.toISOString();
+
+    // 2. Build the condition for the target disposition
+    let dispositionCondition = "";
+    const params = [agentId, startDateStr, endDateStr];
+
+    if (disposition === "TOTAL_COLLECTED") {
+      dispositionCondition = "latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT')";
+    } else {
+      dispositionCondition = "latest_ad.disposition = ?";
+      params.push(disposition);
+    }
+
+    // 3. Fetch the data
+    const [rows] = await pool.query(
+      `
+      SELECT 
+        COALESCE(ac.customer_name, cd.cust_name) AS customer_name, 
+        COALESCE(ac.phone, cd.mobileno) AS contact_no, 
+        c.campaign_name, 
+        latest_ad.disposition AS latest_disposition, 
+        latest_ad.promise_amount AS amount, 
+        latest_ad.follow_up_date, 
+        latest_ad.follow_up_time,
+        latest_ad.payment_date
+      FROM (
+        SELECT ad.agent_case_id, MAX(ad.id) AS max_ad_id
+        FROM agent_dispositions ad
+        WHERE ad.agent_id = ? AND ad.created_at BETWEEN ? AND ?
+        GROUP BY ad.agent_case_id
+      ) target_cases
+      JOIN agent_dispositions latest_ad ON latest_ad.id = target_cases.max_ad_id
+      JOIN agent_cases ac ON ac.id = latest_ad.agent_case_id
+      LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id 
+      LEFT JOIN campaigns c ON c.id = cd.campaign_id
+      WHERE ${dispositionCondition}
+      ORDER BY latest_ad.created_at DESC
+      `,
+      params
+    );
+
+    res.json({ data: rows });
+  } catch (err) {
+    console.error("getAgentDrilldown error:", err);
+    res.status(500).json({ message: "Failed to fetch drilldown data" });
+  }
+};

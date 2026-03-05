@@ -17,6 +17,7 @@ import {
   getMonitoringAgents,
   getMonitoringCampaigns,
   getMonitoringDrilldown,
+  exportMonitoringDrilldown,
 } from '../controllers/adminMonitoringController.js';
 
 import { exportSingleTable } from "../controllers/adminController.js";
@@ -132,6 +133,17 @@ router.get(
   protect,
   allowRoles('ADMIN'),
   getMonitoringDrilldown
+);
+
+/**
+ * GET /api/admin/monitoring-analytics/drilldown/export
+ * Export drilldown list to CSV
+ */
+router.get(
+  '/monitoring-analytics/drilldown/export',
+  protect,
+  allowRoles('ADMIN'),
+  exportMonitoringDrilldown
 );
 
 export default router;
