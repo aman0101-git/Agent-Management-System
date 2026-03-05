@@ -66,7 +66,7 @@ const CreateUser = () => {
       // ISSUE #1 FIX: Redirect to Admin Dashboard after successful user creation
       setTimeout(() => {
         navigate("/admin/dashboard");
-      }, 1500);
+      }, 1000);
     } catch (err) {
       setError(err.response?.data?.message || "Failed to create user");
     }

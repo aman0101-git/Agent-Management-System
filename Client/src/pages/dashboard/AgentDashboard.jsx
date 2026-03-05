@@ -2,15 +2,16 @@ import { useEffect, useState } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { fetchAgentCases, fetchNextCase } from "@/api/agentApi";
 import CustomerDetailDrawer from "@/components/CustomerDetailDrawer";
-import AgentNavbar from "@/components/AgentNavbar"; // Import the new navbar
+import AgentNavbar from "@/components/AgentNavbar";
 
 const AgentDashboard = () => {
   const [fetchingNext, setFetchingNext] = useState(false);
-  const { token } = useAuth(); // Removed user & logout since Navbar handles them
+  const { token } = useAuth();
 
   const [cases, setCases] = useState([]);
   const [filteredCases, setFilteredCases] = useState([]);
   const [search, setSearch] = useState("");
+  const [dispositionFilter, setDispositionFilter] = useState("ALL");
   const [loading, setLoading] = useState(true);
 
   const [selectedCaseId, setSelectedCaseId] = useState(null);
@@ -48,21 +49,23 @@ const AgentDashboard = () => {
   }, [token]);
 
   useEffect(() => {
-    if (!search) {
-      setFilteredCases(cases);
-    } else {
-      setFilteredCases(
-        cases.filter(
-          (c) =>
-            String(c.phone || "").includes(search) ||
-            String(c.customer_name || "")
-              .toLowerCase()
-              .includes(search.toLowerCase()) ||
-            String(c.loan_id || "").includes(search)
-        )
+    let result = cases;
+
+    if (search) {
+      result = result.filter(
+        (c) =>
+          String(c.phone || "").includes(search) ||
+          String(c.customer_name || "").toLowerCase().includes(search.toLowerCase()) ||
+          String(c.loan_id || "").includes(search)
       );
     }
-  }, [search, cases]);
+
+    if (dispositionFilter !== "ALL") {
+      result = result.filter((c) => c.latest_disposition === dispositionFilter);
+    }
+
+    setFilteredCases(result);
+  }, [search, dispositionFilter, cases]);
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
@@ -102,40 +105,47 @@ const AgentDashboard = () => {
     return "";
   };
 
-  const getFollowUpPriority = (caseItem) => {
-    if (caseItem.status !== "FOLLOW_UP" || !caseItem.follow_up_date) return 3;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const followUpDate = new Date(caseItem.follow_up_date);
-    followUpDate.setHours(0, 0, 0, 0);
+  const getSortingPriority = (caseItem) => {
+    if (caseItem.status === "NEW") return 0;
 
-    if (followUpDate < today) return 0;
-    if (followUpDate.getTime() === today.getTime()) return 1;
-    return 2;
+    if (caseItem.status === "FOLLOW_UP" && caseItem.follow_up_date) {
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      const followUpDate = new Date(caseItem.follow_up_date);
+      followUpDate.setHours(0, 0, 0, 0);
+
+      if (followUpDate < today) return 1; 
+      if (followUpDate.getTime() === today.getTime()) return 2; 
+      return 3; 
+    }
+
+    if (caseItem.status === "DONE") return 4;
+    return 5;
   };
 
   const sortedCases = [...filteredCases].sort((a, b) => {
-    const pA = getFollowUpPriority(a);
-    const pB = getFollowUpPriority(b);
+    const pA = getSortingPriority(a);
+    const pB = getSortingPriority(b);
+    
     if (pA !== pB) return pA - pB;
+    
     if (a.status === "FOLLOW_UP" && b.status === "FOLLOW_UP") {
       const dateA = new Date(`${a.follow_up_date} ${a.follow_up_time || "00:00"}`);
       const dateB = new Date(`${b.follow_up_date} ${b.follow_up_time || "00:00"}`);
       return dateA - dateB;
     }
+    
     return 0;
   });
-
+  
   return (
     <div className="min-h-screen bg-slate-50/50">
-      
-      {/* 1. New Agent Navbar */}
       <AgentNavbar />
 
       <main className="mx-auto max-w-7xl px-4 sm:px-6 py-8">
         
         {/* Search & Action Bar */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 mb-4">
           <div className="relative w-full sm:max-w-md">
             <input
               type="text"
@@ -187,21 +197,42 @@ const AgentDashboard = () => {
           </button>
         </div>
 
+        {/* Disposition Filter Bar */}
+        <div className="flex flex-wrap items-center gap-2 mb-6">
+          <span className="text-sm font-medium text-slate-500 mr-1">Filter Disposition:</span>
+          {["ALL", "PTP", "RTP", "BRP", "PRT", "SIF", "PIF", "FCL", "CBC"].map((disp) => (
+            <button
+              key={disp}
+              onClick={() => setDispositionFilter(disp)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                dispositionFilter === disp
+                  ? "bg-blue-100 border-blue-200 text-blue-700"
+                  : "bg-white border-slate-200 text-slate-600 hover:bg-slate-50"
+              }`}
+            >
+              {disp}
+            </button>
+          ))}
+        </div>
+
         {/* Table Container */}
         {!loading && sortedCases.length > 0 ? (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="overflow-x-auto">
-              <div className="min-w-[1000px]">
-                {/* Table Header */}
+              {/* Increased min-w to ensure it never breaks into multiple lines */}
+              <div className="min-w-[1100px]">
+                
+                {/* Table Header: Exactly 12 columns total */}
                 <div className="grid grid-cols-12 gap-4 bg-slate-50/80 px-6 py-3 border-b border-slate-200 text-xs font-semibold uppercase tracking-wider text-slate-500">
                   <div className="col-span-2">Customer Name</div>
                   <div className="col-span-2">Loan ID</div>
                   <div className="col-span-1">Phone</div>
                   <div className="col-span-1 text-center">Status</div>
+                  <div className="col-span-1 text-center">Disposition</div>
                   <div className="col-span-1 text-right">Inst. Amt</div>
                   <div className="col-span-1 text-right">POS</div>
                   <div className="col-span-1 text-center">Bucket</div>
-                  <div className="col-span-2">Follow-up</div>
+                  <div className="col-span-1 text-center">Follow-up</div> 
                   <div className="col-span-1 text-right">Action</div>
                 </div>
 
@@ -230,6 +261,12 @@ const AgentDashboard = () => {
                           {caseItem.status}
                         </span>
                       </div>
+                      
+                      {/* Disposition is now perfectly inline */}
+                      <div className="col-span-1 text-center font-medium text-slate-600">
+                        {caseItem.latest_disposition || "-"}
+                      </div>
+                      
                       <div className="col-span-1 text-right font-medium text-slate-700">
                         {caseItem.insl_amt || "-"}
                       </div>
@@ -239,9 +276,11 @@ const AgentDashboard = () => {
                       <div className="col-span-1 text-center text-slate-600">
                         {caseItem.bom_bucket || "-"}
                       </div>
-                      <div className="col-span-2 text-xs text-slate-600">
+                      
+                      {/* Follow up takes 1 column width, Date and Time stack nicely */}
+                      <div className="col-span-1 text-center text-xs text-slate-600">
                         {caseItem.follow_up_date ? (
-                          <div className="flex flex-col">
+                          <div className="flex flex-col items-center">
                             <span className="font-medium text-slate-900">
                               {formatDate(caseItem.follow_up_date)}
                             </span>
@@ -251,6 +290,7 @@ const AgentDashboard = () => {
                           <span className="text-slate-400">-</span>
                         )}
                       </div>
+                      
                       <div className="col-span-1 text-right">
                         <button className="text-blue-600 hover:text-blue-800 font-medium text-xs uppercase tracking-wide">
                           View
@@ -274,7 +314,6 @@ const AgentDashboard = () => {
               <button 
                 onClick={async () => {
                   setFetchingNext(true);
-                  // ... logic to fetch next case
                   setFetchingNext(false);
                 }}
                 className="mt-4 text-blue-600 text-sm font-medium hover:underline"

@@ -45,7 +45,8 @@ const FileExports = () => {
     setLoadingFull(true);
     setErrorFull("");
     try {
-      const res = await fetch("/api/admin/exports", {
+      // 🟢 FIX: Added http://localhost:5000 to the fetch URL
+      const res = await fetch("http://localhost:5000/api/admin/exports", {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,
@@ -85,7 +86,8 @@ const FileExports = () => {
       if (from) params.append("from", from);
       if (to) params.append("to", to);
 
-      const res = await fetch(`/api/admin/exports/table?${params}`, {
+      // 🟢 FIX: Added http://localhost:5000 to the fetch URL
+      const res = await fetch(`http://localhost:5000/api/admin/exports/table?${params}`, {
         method: "GET",
         headers: {
           Authorization: `Bearer ${token}`,

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/context/AuthContext";
 import { searchCustomers } from "@/api/agentApi";
 import { Button } from "@/components/ui/button";
@@ -19,6 +20,7 @@ import {
 
 const CustomerSearch = () => {
   const { token } = useAuth();
+  const navigate = useNavigate();
 
   const [searchInput, setSearchInput] = useState("");
   const [results, setResults] = useState([]);
@@ -224,6 +226,11 @@ const CustomerSearch = () => {
           onClose={() => {
             setDrawerOpen(false);
             setSelectedCaseId(null);
+          }}
+          onDispositionSubmitted={() => {
+            setDrawerOpen(false);
+            setSelectedCaseId(null);
+            navigate("/agent/dashboard"); 
           }}
         />
       )}
