@@ -1,240 +1,195 @@
 import ExcelJS from "exceljs";
 import pool from "../config/mysql.js";
 
-export const exportAdminData = async (req, res) => {
+export const exportMasterData = async (req, res) => {
   try {
     if (!req.user || req.user.role !== "ADMIN") {
       return res.status(401).json({ message: "Unauthorized" });
     }
 
-    const workbook = new ExcelJS.Workbook();
+    const { from, to, agents, campaigns } = req.query;
 
-    /* ===============================
-       HELPER: EXPORT TABLE AS SHEET
-       =============================== */
-    const exportTable = async (sheetName, sql) => {
-      const [rows] = await pool.query(sql);
-      const sheet = workbook.addWorksheet(sheetName);
-      if (!rows.length) return;
+    let whereClauses = [];
+    let params = [];
 
-      sheet.columns = Object.keys(rows[0]).map(k => ({
-        header: k,
-        key: k,
-      }));
-      rows.forEach(r => sheet.addRow(r));
-    };
-
-    /* ===============================
-       RAW TABLE SHEETS (UNCHANGED)
-       =============================== */
-    await exportTable("agent_cases", `SELECT * FROM agent_cases`);
-    await exportTable("agent_dispositions", `SELECT * FROM agent_dispositions`);
-    await exportTable(
-      "agent_dispositions_edit_history",
-      `SELECT * FROM agent_dispositions_edit_history`
-    );
-    await exportTable("agent_targets", `SELECT * FROM agent_targets`);
-    await exportTable("campaigns", `SELECT * FROM campaigns`);
-    await exportTable("campaign_agents", `SELECT * FROM campaign_agents`);
-    await exportTable("coll_data", `SELECT * FROM coll_data`);
-    await exportTable("users", `SELECT * FROM users`);
-
-    /* ===============================
-       PTP / PRT FULL ENRICHED REPORT
-       =============================== */
-    const [ptpRows] = await pool.query(`
-      SELECT
-        ac.id                   AS agent_case_id,
-
-        cd.cust_name            AS customer_name,
-        cd.mobileno             AS mobile_no,
-        cd.loan_agreement_no    AS loan_id,
-
-        ad.disposition,
-        ad.ptp_target,
-        ad.promise_amount,
-        ad.created_at           AS disposition_created_at,
-
-        ac.agent_id,
-        u.username              AS agent_username,
-
-        cd.campaign_id,
-        c.campaign_name
-
-      FROM agent_cases ac
-      JOIN agent_dispositions ad
-        ON ad.agent_case_id = ac.id
-      LEFT JOIN coll_data cd
-        ON cd.id = ac.coll_data_id
-      LEFT JOIN users u
-        ON u.id = ac.agent_id
-      LEFT JOIN campaigns c
-        ON c.id = cd.campaign_id
-      WHERE ad.disposition IN ('PTP','PRT')
-      ORDER BY ad.created_at DESC
-    `);
-
-    const ptpSheet = workbook.addWorksheet("ptp_prt_full_report");
-
-    if (ptpRows.length) {
-      ptpSheet.columns = Object.keys(ptpRows[0]).map(k => ({
-        header: k,
-        key: k,
-      }));
-      ptpRows.forEach(r => ptpSheet.addRow(r));
+    // 1. Date Filter (Filtering by customer upload/creation date)
+    if (from && to) {
+      whereClauses.push(`cd.created_at BETWEEN ? AND ?`);
+      params.push(`${from} 00:00:00`, `${to} 23:59:59`);
+    } else if (from) {
+      whereClauses.push(`cd.created_at >= ?`);
+      params.push(`${from} 00:00:00`);
+    } else if (to) {
+      whereClauses.push(`cd.created_at <= ?`);
+      params.push(`${to} 23:59:59`);
     }
 
-    /* ===============================
-       SEND FILE
-       =============================== */
+    // 2. Agents Filter (Multi-select)
+    if (agents) {
+      const agentIds = agents.split(',').map(id => id.trim());
+      const placeholders = agentIds.map(() => '?').join(',');
+      whereClauses.push(`ac.agent_id IN (${placeholders})`);
+      params.push(...agentIds);
+    }
+
+    // 3. Campaigns Filter (Multi-select)
+    if (campaigns) {
+      const campaignIds = campaigns.split(',').map(id => id.trim());
+      const placeholders = campaignIds.map(() => '?').join(',');
+      whereClauses.push(`cd.campaign_id IN (${placeholders})`);
+      params.push(...campaignIds);
+    }
+
+    let whereSQL = whereClauses.length > 0 ? `WHERE ` + whereClauses.join(' AND ') : '';
+
+    // 1. Fetch Master Data (One row per unique customer, with dynamic WHERE)
+    const mainQuery = `
+      SELECT 
+        cd.*,
+        ac.id AS case_id,
+        ac.status AS case_status,
+        ac.first_call_at,
+        ac.last_call_at,
+        c.campaign_name,
+        CONCAT(u.firstName, ' ', u.lastName) AS agent_name,
+        u.username AS agent_username,
+        latest_ad.disposition AS latest_disposition,
+        latest_ad.promise_amount AS latest_promise_amount,
+        latest_ad.payment_date AS latest_payment_date,
+        latest_ad.follow_up_date AS latest_follow_up_date,
+        latest_ad.remarks AS latest_remarks,
+        IF(coc_ptp.id IS NOT NULL, 'YES', 'NO') AS EVER_PTP,
+        IF(coc_prt.id IS NOT NULL, 'YES', 'NO') AS EVER_PRT
+      FROM coll_data cd
+      LEFT JOIN agent_cases ac ON cd.id = ac.coll_data_id
+      LEFT JOIN campaigns c ON cd.campaign_id = c.id
+      LEFT JOIN users u ON ac.agent_id = u.id
+      LEFT JOIN (
+        SELECT ad1.* FROM agent_dispositions ad1
+        JOIN (SELECT agent_case_id, MAX(id) as max_id FROM agent_dispositions GROUP BY agent_case_id) ad2 
+        ON ad1.id = ad2.max_id
+      ) latest_ad ON latest_ad.agent_case_id = ac.id
+      LEFT JOIN customer_once_constraints coc_ptp 
+        ON coc_ptp.coll_data_id = cd.id AND coc_ptp.constraint_type = 'ONCE_PTP'
+      LEFT JOIN customer_once_constraints coc_prt 
+        ON coc_prt.coll_data_id = cd.id AND coc_prt.constraint_type = 'ONCE_PRT'
+      ${whereSQL}
+      ORDER BY cd.id DESC
+    `;
+
+    const [mainData] = await pool.query(mainQuery, params);
+
+    if (!mainData.length) {
+      return res.status(404).json({ message: "No data available to export for the selected filters." });
+    }
+
+    // 2. Fetch Disposition History ONLY for the filtered cases
+    const caseIds = mainData.map(row => row.case_id).filter(id => id != null);
+    let historyData = [];
+
+    if (caseIds.length > 0) {
+      const historyPlaceholders = caseIds.map(() => '?').join(',');
+      const [hData] = await pool.query(`
+        SELECT agent_case_id, disposition, promise_amount, created_at, remarks
+        FROM agent_dispositions
+        WHERE agent_case_id IN (${historyPlaceholders})
+        ORDER BY agent_case_id, created_at ASC
+      `, caseIds);
+      historyData = hData;
+    }
+
+    // Group history by case_id to find max columns needed
+    const historyMap = {};
+    let maxEdits = 0;
+    
+    historyData.forEach(row => {
+      if (!historyMap[row.agent_case_id]) {
+        historyMap[row.agent_case_id] = [];
+      }
+      historyMap[row.agent_case_id].push(row);
+      if (historyMap[row.agent_case_id].length > maxEdits) {
+        maxEdits = historyMap[row.agent_case_id].length;
+      }
+    });
+
+    // 3. Prepare Excel Workbook
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Master Customer Report");
+
+    // Extract headers from the main SQL query
+    const firstRowKeys = Object.keys(mainData[0]);
+    const columns = firstRowKeys.map(key => ({
+      header: key.toUpperCase(),
+      key: key
+    }));
+
+    // Generate Dynamic Header Columns based on max attempt counts
+    for (let i = 1; i <= maxEdits; i++) {
+      columns.push({ header: `ATTEMPT_${i}_DISPOSITION`, key: `attempt_${i}_disp` });
+      columns.push({ header: `ATTEMPT_${i}_AMOUNT`, key: `attempt_${i}_amt` });
+      columns.push({ header: `ATTEMPT_${i}_DATE`, key: `attempt_${i}_date` });
+      columns.push({ header: `ATTEMPT_${i}_REMARKS`, key: `attempt_${i}_remarks` });
+    }
+    sheet.columns = columns;
+
+    // 4. Merge data and populate rows
+    mainData.forEach(row => {
+      const rowData = { ...row };
+
+      // Format SQL Date objects safely for Excel
+      firstRowKeys.forEach(key => {
+        if (rowData[key] instanceof Date) {
+          const d = rowData[key];
+          const day = String(d.getDate()).padStart(2, '0');
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const year = d.getFullYear();
+          rowData[key] = `${day}/${month}/${year}`;
+        }
+      });
+
+      // Append Dynamic History Data horizontally into the columns
+      if (rowData.case_id && historyMap[rowData.case_id]) {
+        const caseHistory = historyMap[rowData.case_id];
+        caseHistory.forEach((hist, index) => {
+          const i = index + 1;
+          rowData[`attempt_${i}_disp`] = hist.disposition || "";
+          rowData[`attempt_${i}_amt`] = hist.promise_amount || "";
+          
+          if (hist.created_at instanceof Date) {
+            const d = hist.created_at;
+            const day = String(d.getDate()).padStart(2, '0');
+            const month = String(d.getMonth() + 1).padStart(2, '0');
+            const year = d.getFullYear();
+            const time = d.toTimeString().split(' ')[0];
+            rowData[`attempt_${i}_date`] = `${day}/${month}/${year} ${time}`;
+          } else {
+            rowData[`attempt_${i}_date`] = hist.created_at || "";
+          }
+          
+          rowData[`attempt_${i}_remarks`] = hist.remarks || "";
+        });
+      }
+
+      sheet.addRow(rowData);
+    });
+
     res.setHeader(
       "Content-Type",
       "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     );
     res.setHeader(
       "Content-Disposition",
-      `attachment; filename="full_database_export.xlsx"`
+      `attachment; filename="Filtered_Master_Report.xlsx"`
     );
 
     await workbook.xlsx.write(res);
     res.end();
 
   } catch (err) {
-    console.error("EXPORT ERROR:", err);
-    res.status(500).json({ message: "Export failed" });
+    console.error("MASTER EXPORT ERROR:", err);
+    res.status(500).json({ message: "Master Export failed" });
   }
 };
-
-export const exportSingleTable = async (req, res) => {
-  try {
-    if (!req.user || req.user.role !== "ADMIN") {
-      return res.status(401).json({ message: "Unauthorized" });
-    }
-
-    const { table, from, to } = req.query;
-
-    /**
-     * Each table explicitly defines:
-     * - base SQL
-     * - date column WITH ALIAS
-     */
-    const TABLES = {
-      agent_cases: {
-        dateColumn: "ac.created_at",
-        sql: `
-          SELECT
-            ac.*,
-            cd.cust_name          AS customer_name,
-            cd.mobileno           AS phone,
-            cd.loan_agreement_no  AS loan_id,
-
-            ac.agent_id,
-            u.username            AS agent_username
-          FROM agent_cases ac
-          LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id
-          LEFT JOIN users u ON u.id = ac.agent_id
-          WHERE 1=1
-        `,
-      },
-
-      agent_dispositions: {
-        dateColumn: "ad.created_at",
-        sql: `
-          SELECT
-            ad.*,
-            cd.cust_name          AS customer_name,
-            cd.mobileno           AS phone,
-            cd.loan_agreement_no  AS loan_id,
-
-            ac.agent_id,
-            u.username            AS agent_username
-          FROM agent_dispositions ad
-          JOIN agent_cases ac ON ac.id = ad.agent_case_id
-          LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id
-          LEFT JOIN users u ON u.id = ac.agent_id
-          WHERE 1=1
-        `,
-      },
-
-      customer_once_constraints: {
-        dateColumn: "coc.triggered_at",
-        sql: `
-          SELECT
-            coc.*,
-            cd.cust_name          AS customer_name,
-            cd.mobileno           AS phone,
-            cd.loan_agreement_no  AS loan_id,
-
-            ac.agent_id,
-            u.username            AS agent_username
-          FROM customer_once_constraints coc
-          JOIN agent_dispositions ad ON ad.id = coc.triggered_disposition_id
-          JOIN agent_cases ac ON ac.id = ad.agent_case_id
-          LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id
-          LEFT JOIN users u ON u.id = ac.agent_id
-          WHERE 1=1
-        `,
-      },
-    };
-
-    if (!TABLES[table]) {
-      return res.status(400).json({ message: "Invalid table name" });
-    }
-
-    let sql = TABLES[table].sql;
-    const params = [];
-    const dateCol = TABLES[table].dateColumn;
-
-    // ✅ Date filter with qualified column
-    if (from && to) {
-      sql += ` AND ${dateCol} BETWEEN ? AND ?`;
-      params.push(from, to);
-    } else if (from) {
-      sql += ` AND ${dateCol} >= ?`;
-      params.push(from);
-    } else if (to) {
-      sql += ` AND ${dateCol} <= ?`;
-      params.push(to);
-    }
-
-    sql += ` ORDER BY ${dateCol} DESC`;
-
-    const [rows] = await pool.query(sql, params);
-
-    if (!rows.length) {
-      return res.status(200).send("No data available");
-    }
-
-    /* ===============================
-       BUILD CSV
-       =============================== */
-    const headers = Object.keys(rows[0]);
-    let csv = headers.join(",") + "\n";
-
-    rows.forEach(row => {
-      csv += headers
-        .map(h =>
-          row[h] === null || row[h] === undefined
-            ? ""
-            : `"${String(row[h]).replace(/"/g, '""')}"`
-        )
-        .join(",") + "\n";
-    });
-
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader(
-      "Content-Disposition",
-      `attachment; filename="${table}_export.csv"`
-    );
-
-    res.status(200).send(csv);
-
-  } catch (err) {
-    console.error("SINGLE EXPORT ERROR:", err);
-    res.status(500).json({ message: "Export failed" });
-  }
-};
-
 /**
  * POST /api/admin/agent-targets
  * Admin assigns monthly target to an agent

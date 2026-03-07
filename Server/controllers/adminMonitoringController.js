@@ -409,7 +409,7 @@ export const getMonitoringDrilldown = async (req, res) => {
         CASE 
           WHEN latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT') THEN latest_ad.payment_date
           ELSE latest_ad.follow_up_date 
-        END DESC, 
+        END ASC, 
         latest_ad.created_at DESC
       `,
       params
@@ -497,7 +497,7 @@ export const exportMonitoringDrilldown = async (req, res) => {
         CASE 
           WHEN latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT') THEN latest_ad.payment_date
           ELSE latest_ad.follow_up_date 
-        END DESC, 
+        END ASC, 
         latest_ad.created_at DESC
       `,
       params

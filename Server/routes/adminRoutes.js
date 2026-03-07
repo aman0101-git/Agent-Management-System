@@ -9,7 +9,7 @@ import {
   getAllAgentTargets,
   updateAgentTarget,
   deleteAgentTarget,
-  exportAdminData,
+  exportMasterData,
 } from '../controllers/adminController.js';
 
 import {
@@ -20,25 +20,17 @@ import {
   exportMonitoringDrilldown,
 } from '../controllers/adminMonitoringController.js';
 
-import { exportSingleTable } from "../controllers/adminController.js";
-
 const router = express.Router();
 
 /**
- * Export MySQL data to Excel (admin only)
+ * GET /api/admin/exports/master
+ * Master data export with dynamic columns
  */
 router.get(
-  '/exports',
-  protect,
-  allowRoles('ADMIN'),
-  exportAdminData
-);
-
-router.get(
-  "/exports/table",
+  "/exports/master",
   protect,
   allowRoles("ADMIN"),
-  exportSingleTable
+  exportMasterData
 );
 
 /**
