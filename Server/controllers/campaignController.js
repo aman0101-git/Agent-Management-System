@@ -254,6 +254,7 @@ export const getRechurnData = async (req, res) => {
         cd.loan_agreement_no AS loan_id,
         cd.insl_amt,
         cd.pos,
+        cd.bom_bucket,
         cd.created_at AS allocation_date,
 
         u.firstName AS last_agent_first_name,

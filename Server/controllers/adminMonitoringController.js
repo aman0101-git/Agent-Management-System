@@ -315,7 +315,7 @@ export const getMonitoringAnalytics = async (req, res) => {
 export const getMonitoringAgents = async (req, res) => {
   try {
     const [agents] = await pool.query(`
-      SELECT id, username FROM users WHERE role = 'AGENT' AND isActive = 1 ORDER BY username
+      SELECT id, firstName FROM users WHERE role = 'AGENT' AND isActive = 1 ORDER BY firstName
     `);
     res.json({ agents });
   } catch (err) {
@@ -369,7 +369,6 @@ export const getMonitoringDrilldown = async (req, res) => {
       params.push(...campaignIds);
     }
 
-    // Handle "TOTAL_COLLECTED" by converting it into an IN clause
     let dispositionCondition = "";
     if (disposition === "TOTAL_COLLECTED") {
       dispositionCondition = "latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT')";
@@ -406,7 +405,12 @@ export const getMonitoringDrilldown = async (req, res) => {
       LEFT JOIN campaign_agents ca2 ON ca2.agent_id = latest_ad.agent_id
       LEFT JOIN campaigns c ON c.id = ca2.campaign_id
       WHERE ${dispositionCondition}
-      ORDER BY latest_ad.created_at DESC
+      ORDER BY 
+        CASE 
+          WHEN latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT') THEN latest_ad.payment_date
+          ELSE latest_ad.follow_up_date 
+        END DESC, 
+        latest_ad.created_at DESC
       `,
       params
     );
@@ -489,10 +493,26 @@ export const exportMonitoringDrilldown = async (req, res) => {
       LEFT JOIN campaign_agents ca2 ON ca2.agent_id = latest_ad.agent_id
       LEFT JOIN campaigns c ON c.id = ca2.campaign_id
       WHERE ${dispositionCondition}
-      ORDER BY latest_ad.created_at DESC
+      ORDER BY 
+        CASE 
+          WHEN latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT') THEN latest_ad.payment_date
+          ELSE latest_ad.follow_up_date 
+        END DESC, 
+        latest_ad.created_at DESC
       `,
       params
     );
+
+    // Helper function to format date as DD/MM/YYYY
+    const formatDDMMYYYY = (dateVal) => {
+      if (!dateVal) return "";
+      const d = new Date(dateVal);
+      if (isNaN(d.getTime())) return "";
+      const day = String(d.getDate()).padStart(2, "0");
+      const month = String(d.getMonth() + 1).padStart(2, "0");
+      const year = d.getFullYear();
+      return `${day}/${month}/${year}`;
+    };
 
     // Generate CSV
     const header = ["Customer Name", "Loan Agreement No", "Contact No", "Agent Name", "Campaign", "Disposition", "Amount", "Date"];
@@ -500,9 +520,9 @@ export const exportMonitoringDrilldown = async (req, res) => {
     const csvRows = rows.map(row => {
       let dateStr = "";
       if (["PRT", "FCL", "SIF", "PIF", "TOTAL_COLLECTED"].includes(disposition)) {
-        dateStr = row.payment_date ? new Date(row.payment_date).toLocaleDateString() : "-";
+        dateStr = row.payment_date ? formatDDMMYYYY(row.payment_date) : "-";
       } else {
-        const fDate = row.follow_up_date ? new Date(row.follow_up_date).toLocaleDateString() : "";
+        const fDate = row.follow_up_date ? formatDDMMYYYY(row.follow_up_date) : "";
         const fTime = row.follow_up_time || "";
         dateStr = `${fDate} ${fTime}`.trim() || "-";
       }
