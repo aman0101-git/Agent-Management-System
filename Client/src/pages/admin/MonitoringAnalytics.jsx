@@ -8,16 +8,9 @@ import {
   fetchMonitoringDrilldownExport,
 } from "@/api/adminApi";
 import { 
-  Calendar, 
-  Filter, 
   Phone, 
   Users, 
   Banknote, 
-  TrendingUp, 
-  CheckCircle2, 
-  AlertCircle, 
-  PieChart, 
-  BarChart3,
   Loader2,
   X,
   Download
@@ -263,6 +256,19 @@ const MonitoringAnalytics = () => {
 
   const { overview = {}, breakdown = {}, summary = {}, monthlySummary = {} } = analytics || {};
 
+  // Add this helper function to format dates
+  const formatToDDMMYYYY = (dateString) => {
+    if (!dateString) return "-";
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return "-";
+    
+    const day = String(date.getDate()).padStart(2, '0');
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const year = date.getFullYear();
+    
+    return `${day}/${month}/${year}`;
+  };
+
   return (
     <div className="bg-gradient-to-br from-slate-50 to-slate-100 min-h-screen relative">
       <AdminNavbar/>
@@ -412,7 +418,7 @@ const MonitoringAnalytics = () => {
                       onChange={() => toggleAgent(a.id)}
                       className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500"
                     />
-                    <span className="text-sm text-slate-700">{a.username}</span>
+                    <span className="text-sm text-slate-700">{a.firstName}</span>
                   </label>
                 ))}
               </div>
@@ -842,18 +848,18 @@ const MonitoringAnalytics = () => {
                             {row.amount ? formatCurrency(row.amount) : "-"}
                           </td>
                           <td className="px-4 py-3 text-slate-600">
-                            {/* CONDITIONAL DATE RENDERING */}
+                            {/* CONDITIONAL DATE RENDERING WITH DD/MM/YYYY FORMAT */}
                             {["PRT", "FCL", "SIF", "PIF", "TOTAL_COLLECTED"].includes(selectedDisposition) ? (
                               <span>
                                 {row.payment_date 
-                                  ? new Date(row.payment_date).toLocaleDateString() 
+                                  ? formatToDDMMYYYY(row.payment_date) 
                                   : "-"}
                               </span>
                             ) : (
                               <div className="flex flex-col">
                                 <span>
                                   {row.follow_up_date 
-                                    ? new Date(row.follow_up_date).toLocaleDateString() 
+                                    ? formatToDDMMYYYY(row.follow_up_date) 
                                     : "-"}
                                 </span>
                                 <span className="text-xs text-slate-400">

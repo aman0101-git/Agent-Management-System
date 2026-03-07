@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useAuth } from "@/context/AuthContext";
 import { Button } from "@/components/ui/button";
 import axios from "axios";
@@ -27,8 +27,9 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
   const [selectedIds, setSelectedIds] = useState(new Set());
   const [rechurning, setRechurning] = useState(false);
 
-  /* 🔹 Multi-select disposition filter */
+  /* 🔹 Multi-select filters */
   const [selectedDispositions, setSelectedDispositions] = useState([]);
+  const [selectedBomBuckets, setSelectedBomBuckets] = useState([]);
 
   useEffect(() => {
     if (isOpen) {
@@ -46,42 +47,52 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
       );
       setRechurnData(res.data.rechurnData || []);
     } catch {
-      setError("Failed to load rechurn data");
+      setError("Failed to load rechurn data. Please try again.");
     } finally {
       setLoading(false);
     }
   };
 
-  /* ===============================
-     Filtered data (multi-select)
-     =============================== */
-  const filteredRechurnData =
-    selectedDispositions.length === 0
-      ? rechurnData
-      : rechurnData.filter((d) =>
-          selectedDispositions.includes(d.disposition)
-        );
+  /* Extract unique BOM Buckets dynamically from fetched data */
+  const availableBomBuckets = useMemo(() => {
+    const buckets = rechurnData.map((d) => d.bom_bucket).filter((b) => b != null);
+    return [...new Set(buckets)].sort();
+  }, [rechurnData]);
 
-  /* Reset selection when filter changes */
+  /* Filtered data (multi-select combo) */
+  const filteredRechurnData = useMemo(() => {
+    return rechurnData.filter((d) => {
+      const matchesDisposition =
+        selectedDispositions.length === 0 || selectedDispositions.includes(d.disposition);
+      const matchesBucket =
+        selectedBomBuckets.length === 0 || selectedBomBuckets.includes(d.bom_bucket);
+      
+      return matchesDisposition && matchesBucket;
+    });
+  }, [rechurnData, selectedDispositions, selectedBomBuckets]);
+
+  /* Reset selection when any filter changes */
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [selectedDispositions]);
+  }, [selectedDispositions, selectedBomBuckets]);
 
   const toggleDispositionFilter = (value) => {
     setSelectedDispositions((prev) =>
-      prev.includes(value)
-        ? prev.filter((d) => d !== value)
-        : [...prev, value]
+      prev.includes(value) ? prev.filter((d) => d !== value) : [...prev, value]
+    );
+  };
+
+  const toggleBomBucketFilter = (value) => {
+    setSelectedBomBuckets((prev) =>
+      prev.includes(value) ? prev.filter((b) => b !== value) : [...prev, value]
     );
   };
 
   const toggleSelectAll = () => {
-    if (selectedIds.size === filteredRechurnData.length) {
+    if (selectedIds.size === filteredRechurnData.length && filteredRechurnData.length > 0) {
       setSelectedIds(new Set());
     } else {
-      setSelectedIds(
-        new Set(filteredRechurnData.map((d) => d.case_id))
-      );
+      setSelectedIds(new Set(filteredRechurnData.map((d) => d.case_id)));
     }
   };
 
@@ -92,10 +103,7 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
   };
 
   const handleRechurn = async () => {
-    if (selectedIds.size === 0) {
-      setError("Please select at least one record to rechurn");
-      return;
-    }
+    if (selectedIds.size === 0) return;
 
     setRechurning(true);
     setError("");
@@ -106,7 +114,6 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
         { headers }
       );
 
-      alert(res.data.message || "Data rechurned successfully");
       loadRechurnData();
       setSelectedIds(new Set());
       onSuccess?.();
@@ -120,138 +127,242 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-      <div className="max-h-[90vh] w-full max-w-4xl rounded-2xl bg-white p-6 shadow-xl overflow-y-auto">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+      <div className="flex flex-col w-full max-w-6xl max-h-[90vh] bg-white rounded-2xl shadow-2xl overflow-hidden">
+        
         {/* Header */}
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-2xl font-bold text-slate-900">
-            Rechurn Data
-          </h2>
-          <button onClick={onClose} className="text-2xl text-slate-400">
-            ×
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 bg-white">
+          <div>
+            <h2 className="text-xl font-semibold text-slate-800">Rechurn Campaign Data</h2>
+            <p className="text-sm text-slate-500 mt-1">Filter and redistribute customer cases back to the agent pool.</p>
+          </div>
+          <button 
+            onClick={onClose} 
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
+          >
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
           </button>
         </div>
 
-        {error && (
-          <div className="mb-4 rounded bg-rose-50 px-4 py-2 text-sm text-rose-600">
-            {error}
-          </div>
-        )}
+        {/* Scrollable Body */}
+        <div className="flex-1 overflow-y-auto bg-slate-50/50">
+          <div className="p-6 space-y-6">
+            
+            {error && (
+              <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 flex items-center gap-3 text-rose-700">
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 flex-shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clipRule="evenodd" />
+                </svg>
+                <p className="text-sm font-medium">{error}</p>
+              </div>
+            )}
 
-        {loading && (
-          <p className="mb-4 text-sm text-slate-500">Loading…</p>
-        )}
+            {/* Filters Section */}
+            <div className="grid gap-6 md:grid-cols-2">
+              {/* Disposition Filter */}
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <p className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z" />
+                  </svg>
+                  Filter by Disposition
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {RECHURN_DISPOSITIONS.map((d) => {
+                    const isSelected = selectedDispositions.includes(d);
+                    return (
+                      <button
+                        key={d}
+                        onClick={() => toggleDispositionFilter(d)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-all ${
+                          isSelected 
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200" 
+                            : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        {d}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
 
-        {/* ===============================
-           Multi-select Disposition Filter
-           =============================== */}
-        <div className="mb-4 rounded-lg border bg-slate-50 p-3">
-          <p className="mb-2 text-sm font-medium text-slate-700">
-            Filter by Disposition
-          </p>
-          <div className="flex flex-wrap gap-3">
-            {RECHURN_DISPOSITIONS.map((d) => (
-              <label
-                key={d}
-                className="flex items-center gap-2 text-sm text-slate-700"
-              >
-                <input
-                  type="checkbox"
-                  checked={selectedDispositions.includes(d)}
-                  onChange={() => toggleDispositionFilter(d)}
-                  className="h-4 w-4"
-                />
-                {d}
-              </label>
-            ))}
+              {/* BOM Bucket Filter */}
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <p className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10" />
+                  </svg>
+                  Filter by BOM Bucket
+                </p>
+                {availableBomBuckets.length === 0 ? (
+                  <p className="text-sm text-slate-400 italic">No buckets available in current data.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {availableBomBuckets.map((bucket) => {
+                      const isSelected = selectedBomBuckets.includes(bucket);
+                      return (
+                        <button
+                          key={bucket}
+                          onClick={() => toggleBomBucketFilter(bucket)}
+                          className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-all ${
+                            isSelected 
+                              ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200" 
+                              : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                          }`}
+                        >
+                          Bucket {bucket}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Table Section */}
+            <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden flex flex-col">
+              
+              {/* Table Header Info */}
+              <div className="px-5 py-4 border-b border-slate-200 bg-white flex items-center justify-between">
+                <p className="text-sm font-medium text-slate-600">
+                  Showing <span className="font-bold text-slate-900">{filteredRechurnData.length}</span> matching records 
+                  <span className="text-slate-400 font-normal ml-1">(Total: {rechurnData.length})</span>
+                </p>
+                {selectedIds.size > 0 && (
+                  <span className="text-sm font-semibold text-indigo-600 bg-indigo-50 px-3 py-1 rounded-full">
+                    {selectedIds.size} Selected
+                  </span>
+                )}
+              </div>
+
+              {/* Actual Table */}
+              <div className="overflow-x-auto relative">
+                {loading ? (
+                  <div className="flex flex-col items-center justify-center p-12 text-slate-400">
+                    <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4"></div>
+                    <p className="text-sm font-medium">Loading data...</p>
+                  </div>
+                ) : (
+                  <table className="w-full text-sm text-left whitespace-nowrap">
+                    <thead className="text-xs text-slate-500 bg-slate-50 uppercase font-semibold sticky top-0 z-10">
+                      <tr>
+                        <th className="px-5 py-4 w-12">
+                          <input
+                            type="checkbox"
+                            className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                            checked={
+                              filteredRechurnData.length > 0 &&
+                              selectedIds.size === filteredRechurnData.length
+                            }
+                            onChange={toggleSelectAll}
+                          />
+                        </th>
+                        <th className="px-5 py-4">Customer Name</th>
+                        <th className="px-5 py-4">Phone Number</th>
+                        <th className="px-5 py-4">Loan ID</th>
+                        <th className="px-5 py-4">BOM Bucket</th>
+                        <th className="px-5 py-4">Last Agent</th>
+                        <th className="px-5 py-4">Disposition</th>
+                        <th className="px-5 py-4">Disposed On</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {filteredRechurnData.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                            <p className="text-base font-medium text-slate-600">No records found</p>
+                            <p className="text-sm mt-1">Try adjusting your filters above.</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        filteredRechurnData.map((r) => {
+                          const isSelected = selectedIds.has(r.case_id);
+                          return (
+                            <tr 
+                              key={r.case_id} 
+                              className={`transition-colors hover:bg-slate-50 ${isSelected ? "bg-indigo-50/30" : ""}`}
+                              onClick={() => toggleSelect(r.case_id)}
+                            >
+                              <td className="px-5 py-3" onClick={(e) => e.stopPropagation()}>
+                                <input
+                                  type="checkbox"
+                                  className="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                                  checked={isSelected}
+                                  onChange={() => toggleSelect(r.case_id)}
+                                />
+                              </td>
+                              <td className="px-5 py-3 font-medium text-slate-800">{r.customer_name}</td>
+                              <td className="px-5 py-3 text-slate-600">{r.phone}</td>
+                              <td className="px-5 py-3 text-slate-600 font-mono text-xs">{r.loan_id}</td>
+                              <td className="px-5 py-3">
+                                {r.bom_bucket ? (
+                                  <span className="inline-flex items-center justify-center px-2 py-1 rounded bg-slate-100 text-slate-700 text-xs font-semibold border border-slate-200">
+                                    Bucket {r.bom_bucket}
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-400 italic">N/A</span>
+                                )}
+                              </td>
+                              <td className="px-5 py-3 text-slate-600">
+                                {r.last_agent_first_name} {r.last_agent_last_name}
+                              </td>
+                              <td className="px-5 py-3">
+                                <span className="inline-flex items-center px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 text-xs font-semibold">
+                                  {r.disposition}
+                                </span>
+                              </td>
+                              <td className="px-5 py-3 text-slate-500 text-xs">
+                                {new Date(r.last_disposition_date).toLocaleDateString(undefined, {
+                                  year: 'numeric', month: 'short', day: 'numeric'
+                                })}
+                              </td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
           </div>
-          <p className="mt-2 text-xs text-slate-500">
-            Showing {filteredRechurnData.length} of {rechurnData.length}
-          </p>
         </div>
 
-        {/* ===============================
-           Table (always visible)
-           =============================== */}
-        <div className="overflow-hidden rounded-lg border">
-          <table className="w-full text-sm">
-            <thead className="bg-slate-100">
-              <tr>
-                <th className="px-4 py-2">
-                  <input
-                    type="checkbox"
-                    checked={
-                      filteredRechurnData.length > 0 &&
-                      selectedIds.size === filteredRechurnData.length
-                    }
-                    onChange={toggleSelectAll}
-                  />
-                </th>
-                <th className="px-4 py-2 text-left">Customer</th>
-                <th className="px-4 py-2 text-left">Phone</th>
-                <th className="px-4 py-2 text-left">Loan ID</th>
-                <th className="px-4 py-2 text-left">Agent</th>
-                <th className="px-4 py-2 text-left">Disposition</th>
-                <th className="px-4 py-2 text-left">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredRechurnData.length === 0 ? (
-                <tr>
-                  <td
-                    colSpan={7}
-                    className="px-4 py-6 text-center text-slate-500"
-                  >
-                    No records match the selected disposition(s)
-                  </td>
-                </tr>
-              ) : (
-                filteredRechurnData.map((r) => (
-                  <tr key={r.case_id} className="border-t">
-                    <td className="px-4 py-2">
-                      <input
-                        type="checkbox"
-                        checked={selectedIds.has(r.case_id)}
-                        onChange={() => toggleSelect(r.case_id)}
-                      />
-                    </td>
-                    <td className="px-4 py-2">{r.customer_name}</td>
-                    <td className="px-4 py-2">{r.phone}</td>
-                    <td className="px-4 py-2">{r.loan_id}</td>
-                    <td className="px-4 py-2">
-                      {r.last_agent_first_name} {r.last_agent_last_name}
-                    </td>
-                    <td className="px-4 py-2">{r.disposition}</td>
-                    <td className="px-4 py-2 text-xs">
-                      {new Date(r.last_disposition_date).toLocaleDateString()}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Footer */}
-        <div className="mt-6 flex justify-end gap-3">
+        {/* Footer Actions */}
+        <div className="px-6 py-4 bg-white border-t border-slate-200 flex items-center justify-end gap-3 rounded-b-2xl">
           <Button
             onClick={onClose}
-            className="bg-slate-200 text-slate-700"
+            variant="outline"
+            className="text-slate-600 hover:bg-slate-50 border-slate-300"
           >
             Cancel
           </Button>
           <Button
             onClick={handleRechurn}
             disabled={selectedIds.size === 0 || rechurning}
-            className={
+            className={`min-w-[140px] ${
               selectedIds.size === 0 || rechurning
-                ? "bg-slate-300 text-slate-600"
-                : "bg-indigo-600 text-white"
-            }
+                ? "bg-slate-100 text-slate-400 cursor-not-allowed"
+                : "bg-indigo-600 text-white hover:bg-indigo-700 shadow-md shadow-indigo-200"
+            }`}
           >
-            {rechurning ? "Rechurning..." : "Rechurn Selected"}
+            {rechurning ? (
+              <span className="flex items-center gap-2">
+                <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></div>
+                Processing...
+              </span>
+            ) : (
+              `Rechurn Selected (${selectedIds.size})`
+            )}
           </Button>
         </div>
+
       </div>
     </div>
   );
