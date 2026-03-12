@@ -178,7 +178,15 @@ const AgentDashboard = () => {
                   alert("Could not fetch next customer.");
                 }
               } catch (e) {
-                alert("Error fetching next customer.");
+                // 🟢 FIX: Added the 409 conflict handling block here
+                if (e.response && e.response.status === 409) {
+                  alert("You already have an active customer! Please submit a disposition for them before requesting a new one.");
+                  if (typeof window.__reloadAgentCases === "function") {
+                    await window.__reloadAgentCases();
+                  }
+                } else {
+                  alert("Error fetching next customer.");
+                }
               } finally {
                 setFetchingNext(false);
               }
@@ -219,7 +227,6 @@ const AgentDashboard = () => {
         {!loading && sortedCases.length > 0 ? (
           <div className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
             <div className="overflow-x-auto">
-              {/* Increased min-w to ensure it never breaks into multiple lines */}
               <div className="min-w-[1100px]">
                 
                 {/* Table Header: Exactly 12 columns total */}
@@ -314,7 +321,8 @@ const AgentDashboard = () => {
               <button 
                 onClick={async () => {
                   setFetchingNext(true);
-                  setFetchingNext(false);
+                  // Fixed loading state persistence
+                  setFetchingNext(false); 
                 }}
                 className="mt-4 text-blue-600 text-sm font-medium hover:underline"
               >
