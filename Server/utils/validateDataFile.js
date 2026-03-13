@@ -17,29 +17,37 @@ export const normalize = (str) =>
     .replace(/^_+|_+$/g, "");
 
 // ================= HEADER ALIASES =================
+// UPDATED: Expanded massively to catch variations of Excel headers
 const HEADER_ALIASES = {
-  loan_agreement_no: ["loan agreement no"],
-  branch_name: ["branch name"],
-  hub_name: ["hub name"],
-  cust_name: ["customer name"],
-  mobileno: ["mobile number", "mobile"],
-  pos: ["pos"],
-  insl_amt: ["inst amt", "inst_amt"],
-  inst_over: ["inst over"],
-  penal_over: ["penal over"],
-  amount_finance: ["amt fin"],
-  tenure: ["tenure"],
-  loan_status: ["status"],
-  res_addr: ["residence address"],
-  off_addr: ["office address"],
-  agency: ["agency"],
-  feedback: ["feedback"],
-  fdd: ["fdd"],
-  bom_bucket: ["bom bucket"],
-  group_name: ["group"],
-  disb_date: ["disbursal date"],
+  loan_agreement_no: ["loan agreement no", "loan id", "agreement no", "lan", "account no"],
+  branch_name: ["branch name", "branch"],
+  hub_name: ["hub name", "hub"],
+  cust_name: ["customer name", "cust name", "name", "borrower name"],
+  cust_id: ["customer id", "customer_id", "cust id"],
+  mobileno: ["mobile number", "mobile", "phone", "contact no"],
+  pos: ["pos", "principal outstanding", "principal"],
+  insl_amt: ["inst amt", "inst_amt", "installment amount", "emi", "emi amount"],
+  inst_over: ["inst over", "installment overdue", "emi overdue"],
+  penal_over: ["penal over", "penalty overdue", "penalty over"],
+  penal_intrst: ["penal interest", "penal int", "penalty interest"],
+  amount_finance: ["amt fin", "amount finance", "financed amount", "loan amount"],
+  tenure: ["tenure", "loan tenure"],
+  loan_status: ["status", "loan status"],
+  res_addr: ["residence address", "res addr", "address"],
+  off_addr: ["office address", "off addr"],
+  agency: ["agency", "collection agency"],
+  feedback: ["feedback", "remarks"],
+  fdd: ["fdd", "first due date"],
+  bom_bucket: ["bom bucket", "bucket", "bom"],
+  group_name: ["group", "group name"],
+  disb_date: ["disbursal date", "disb date"],
   maturity_date: ["maturity date"],
   ptp_date: ["ptp date"],
+  dpd: ["dpd", "days past due"],
+  product_code: ["product", "product code"],
+  amt_outst: ["amount outstanding", "amt outst", "total outstanding", "os"],
+  tos: ["tos", "total over due", "total overdue"],
+  fresh_vintage_regular: ["fresh vintage regular", "fresh_vintage_regular"],
 };
 
 // ================= HEADER MAPPING =================
@@ -56,14 +64,16 @@ export const mapHeader = (header) => {
 };
 
 // ================= HEADER VALIDATION =================
+// UPDATED: Now maps Excel headers to DB headers BEFORE validating.
+// This prevents crashes if an Excel sheet uses a valid alias instead of the exact required name.
 export const validateHeaders = (headers = []) => {
-  const received = headers.map(normalize);
-  const required = REQUIRED_COLUMNS.map(normalize);
+  const mappedReceived = headers.map(h => mapHeader(h) || normalize(h));
+  const mappedRequired = REQUIRED_COLUMNS.map(h => mapHeader(h) || normalize(h));
 
-  const missing = required.filter((r) => !received.includes(r));
+  const missing = mappedRequired.filter((r) => !mappedReceived.includes(r));
   if (missing.length) {
     throw {
-      message: "Invalid file structure",
+      message: "Invalid file structure. Required columns missing.",
       missing,
       received: headers
     };
@@ -72,6 +82,7 @@ export const validateHeaders = (headers = []) => {
 };
 
 // ================= DATE CONVERSION =================
+// UPDATED: Added 'fdd' so First Due Date parses properly if formatted as a Date cell in Excel.
 const DATE_FIELDS = [
   "disb_date",
   "maturity_date",
@@ -79,7 +90,8 @@ const DATE_FIELDS = [
   "last_paid_date",
   "ptp_date",
   "dob",
-  "max_txn_entry_date"
+  "max_txn_entry_date",
+  "fdd"
 ];
 
 export const convertExcelDate = (value) => {

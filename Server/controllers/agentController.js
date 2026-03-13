@@ -31,14 +31,12 @@ export const getAgentCases = async (req, res) => {
     const [rows] = await pool.query(
       `
       SELECT
+        c.*, -- Fetch all columns dynamically
         c.id AS case_id,
         c.created_at AS allocation_date,
         c.cust_name AS customer_name,
         c.mobileno AS phone,
         c.loan_agreement_no AS loan_id,
-        c.insl_amt,
-        c.pos,
-        c.bom_bucket,
         
         -- Get status from the LATEST agent_case for this agent/customer
         COALESCE(ac.status, 'NEW') AS status,
@@ -103,17 +101,11 @@ export const getAgentCaseById = async (req, res) => {
     const [[row]] = await pool.query(
       `
       SELECT
-        c.id,
+        c.*, -- Fetches ALL fields from coll_data automatically
         c.created_at AS allocation_date,
         c.cust_name AS customer_name,
         c.mobileno AS phone,
         c.loan_agreement_no AS loan_id,
-        c.branch_name, c.hub_name, c.group_name, c.agency,
-        c.dpd, c.pos, c.insl_amt, c.inst_over, c.amt_outst, c.tenure,
-        c.bom_bucket, c.penal_over, c.amount_finance, c.product_code,
-        c.loan_status, c.extra_fields, c.res_addr, c.off_addr,
-        c.disb_date, c.maturity_date, c.fdd,
-        c.agent_id, c.batch_month, c.batch_year, c.campaign_id, c.is_active,
 
         -- Status from latest interaction (Global)
         COALESCE(ac.status, 'NEW') AS status,
@@ -135,8 +127,6 @@ export const getAgentCaseById = async (req, res) => {
 
     /* ===============================
        2️⃣ Fetch Disposition History (BY CUSTOMER ID)
-       FIX: Joins agent_cases to get ALL history for this customer, 
-       regardless of which agent created it.
        =============================== */
     const [dispositions] = await pool.query(
       `
@@ -165,7 +155,6 @@ export const getAgentCaseById = async (req, res) => {
     /* ===============================
        3️⃣ Fetch Edit History (Linked to displayed dispositions)
        =============================== */
-    // We fetch edit history for the dispositions we just retrieved
     const dispositionIds = dispositions.map(d => d.agent_case_id);
     let editHistory = [];
     
@@ -525,21 +514,7 @@ export const searchCustomers = async (req, res) => {
     const [customers] = await pool.query(
       `
       SELECT
-        c.id,
-        c.loan_agreement_no,
-        c.cust_name,
-        c.mobileno,
-        c.appl_id,
-        c.branch_name,
-        c.hub_name,
-        c.amt_outst,
-        c.pos,
-        c.bom_bucket,
-        c.dpd,
-        c.loan_status,
-        c.res_addr,
-        c.created_at,
-        c.agent_id, -- Return who currently owns it
+        c.*, -- Automatically returns all fields in search view as well
         CASE WHEN c.agent_id = ? THEN 1 ELSE 0 END as is_my_case
       FROM coll_data c
       INNER JOIN campaign_agents ca ON c.campaign_id = ca.campaign_id
