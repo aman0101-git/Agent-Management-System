@@ -17,6 +17,17 @@ const RECHURN_DISPOSITIONS = [
   "WRN",
 ];
 
+// Defined precise, non-overlapping POS buckets
+const POS_RANGES = [
+  { label: "0 - 10,000", min: 0, max: 9999 },
+  { label: "10,000 - 30,000", min: 10000, max: 29999 },
+  { label: "30,000 - 50,000", min: 30000, max: 49999 },
+  { label: "50,000 - 1,00,000", min: 50000, max: 99999 },
+  { label: "1,00,000 - 3,00,000", min: 100000, max: 299999 },
+  { label: "3,00,000 - 5,00,000", min: 300000, max: 499999 },
+  { label: "5,00,000+", min: 500000, max: Infinity },
+];
+
 const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
   const { token } = useAuth();
   const headers = { Authorization: `Bearer ${token}` };
@@ -30,6 +41,7 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
   /* 🔹 Multi-select filters */
   const [selectedDispositions, setSelectedDispositions] = useState([]);
   const [selectedBomBuckets, setSelectedBomBuckets] = useState([]);
+  const [selectedPosRanges, setSelectedPosRanges] = useState([]); // New state for POS
 
   useEffect(() => {
     if (isOpen) {
@@ -42,7 +54,7 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
     setError("");
     try {
       const res = await axios.get(
-        `http://localhost:5000/api/campaigns/${campaignId}/rechurn-data`,
+        `http://192.168.1.14:5000/api/campaigns/${campaignId}/rechurn-data`,
         { headers }
       );
       setRechurnData(res.data.rechurnData || []);
@@ -62,19 +74,30 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
   /* Filtered data (multi-select combo) */
   const filteredRechurnData = useMemo(() => {
     return rechurnData.filter((d) => {
+      // 1. Disposition Check
       const matchesDisposition =
         selectedDispositions.length === 0 || selectedDispositions.includes(d.disposition);
+      
+      // 2. BOM Bucket Check
       const matchesBucket =
         selectedBomBuckets.length === 0 || selectedBomBuckets.includes(d.bom_bucket);
       
-      return matchesDisposition && matchesBucket;
-    });
-  }, [rechurnData, selectedDispositions, selectedBomBuckets]);
+      // 3. POS Range Check
+      const matchesPos = selectedPosRanges.length === 0 || selectedPosRanges.some((rangeLabel) => {
+        const range = POS_RANGES.find((r) => r.label === rangeLabel);
+        // Assuming your backend sends the POS amount as `pos_amount`. Update if the key is different.
+        const amount = Number(d.pos) || 0; 
+        return range && amount >= range.min && amount <= range.max;
+      });
 
-  /* Reset selection when any filter changes */
+      return matchesDisposition && matchesBucket && matchesPos;
+    });
+  }, [rechurnData, selectedDispositions, selectedBomBuckets, selectedPosRanges]);
+
+  /* Reset selection when ANY filter changes */
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [selectedDispositions, selectedBomBuckets]);
+  }, [selectedDispositions, selectedBomBuckets, selectedPosRanges]);
 
   const toggleDispositionFilter = (value) => {
     setSelectedDispositions((prev) =>
@@ -85,6 +108,12 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
   const toggleBomBucketFilter = (value) => {
     setSelectedBomBuckets((prev) =>
       prev.includes(value) ? prev.filter((b) => b !== value) : [...prev, value]
+    );
+  };
+
+  const togglePosRangeFilter = (value) => {
+    setSelectedPosRanges((prev) =>
+      prev.includes(value) ? prev.filter((r) => r !== value) : [...prev, value]
     );
   };
 
@@ -109,7 +138,7 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
     setError("");
     try {
       const res = await axios.post(
-        `http://localhost:5000/api/campaigns/${campaignId}/rechurn`,
+        `http://192.168.1.14:5000/api/campaigns/${campaignId}/rechurn`,
         { selectedIds: Array.from(selectedIds) },
         { headers }
       );
@@ -159,8 +188,8 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
               </div>
             )}
 
-            {/* Filters Section */}
-            <div className="grid gap-6 md:grid-cols-2">
+            {/* Filters Section - Updated to grid-cols-3 */}
+            <div className="grid gap-6 md:grid-cols-3">
               {/* Disposition Filter */}
               <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
                 <p className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
@@ -220,6 +249,35 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
                   </div>
                 )}
               </div>
+
+              {/* POS Amount Filter */}
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
+                <p className="text-sm font-semibold text-slate-700 mb-3 flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  Filter by POS Amount
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {POS_RANGES.map((range) => {
+                    const isSelected = selectedPosRanges.includes(range.label);
+                    return (
+                      <button
+                        key={range.label}
+                        onClick={() => togglePosRangeFilter(range.label)}
+                        className={`px-3 py-1.5 text-xs font-medium rounded-full border transition-all ${
+                          isSelected 
+                            ? "bg-indigo-600 border-indigo-600 text-white shadow-md shadow-indigo-200" 
+                            : "bg-white border-slate-200 text-slate-600 hover:border-slate-300 hover:bg-slate-50"
+                        }`}
+                      >
+                        {range.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
             </div>
 
             {/* Table Section */}
@@ -264,6 +322,7 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
                         <th className="px-5 py-4">Phone Number</th>
                         <th className="px-5 py-4">Loan ID</th>
                         <th className="px-5 py-4">BOM Bucket</th>
+                        <th className="px-5 py-4">POS Amount</th> {/* Added to match image */}
                         <th className="px-5 py-4">Last Agent</th>
                         <th className="px-5 py-4">Disposition</th>
                         <th className="px-5 py-4">Disposed On</th>
@@ -272,7 +331,7 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
                     <tbody className="divide-y divide-slate-100">
                       {filteredRechurnData.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-5 py-12 text-center text-slate-500">
+                          <td colSpan={9} className="px-5 py-12 text-center text-slate-500">
                             <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-slate-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                             </svg>
@@ -308,6 +367,9 @@ const RechurnModal = ({ campaignId, isOpen, onClose, onSuccess }) => {
                                 ) : (
                                   <span className="text-slate-400 italic">N/A</span>
                                 )}
+                              </td>
+                              <td className="px-5 py-3 font-medium text-slate-700">
+                                {r.pos != null ? `₹${Number(r.pos).toLocaleString('en-IN')}` : <span className="text-slate-400 italic">N/A</span>}
                               </td>
                               <td className="px-5 py-3 text-slate-600">
                                 {r.last_agent_first_name} {r.last_agent_last_name}
