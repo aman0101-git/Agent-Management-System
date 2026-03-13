@@ -208,7 +208,7 @@ const AgentDashboard = () => {
         {/* Disposition Filter Bar */}
         <div className="flex flex-wrap items-center gap-2 mb-6">
           <span className="text-sm font-medium text-slate-500 mr-1">Filter Disposition:</span>
-          {["ALL", "PTP", "RTP", "BRP", "PRT", "SIF", "PIF", "FCL", "CBC"].map((disp) => (
+          {["ALL", "PTP", "PRT", "SIF", "PIF", "FCL", "CBC"].map((disp) => (
             <button
               key={disp}
               onClick={() => setDispositionFilter(disp)}

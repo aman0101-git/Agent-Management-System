@@ -384,43 +384,85 @@ const CustomerDetailDrawer = ({
             {!loading && caseData && (
               <div className="space-y-10">
 
-                {/* CUSTOMER + LOAN */}
+                {/* FINANCIAL SNAPSHOT */}
                 <Section title="Financial Snapshot" badge="Primary Info">
-                  <Field label="Amount Outstanding" value={`₹${caseData.amt_outst || 0}`} highlight />
-                  <Field label="POS" value={`₹${caseData.pos || 0}`} highlight />
-                  <Field label="Installment Amount" value={`₹${caseData.insl_amt || 0}`} />
-                  <Field label="Installment Over" value={`₹${caseData.inst_over || 0}`} />
-                  <Field label="Penalty Over" value={`₹${caseData.penal_over || 0}`} />
-                  <Field label="DPD" value={caseData.dpd} />
+                  <Field label="Amount Finance" value={caseData.amount_finance ? `₹${caseData.amount_finance}` : "₹0"} />
+                  <Field label="POS" value={caseData.pos ? `₹${caseData.pos}` : "₹0"} highlight />
+                  <Field label="Installment Amount" value={caseData.insl_amt ? `₹${caseData.insl_amt}` : "₹0"} />
+                  <Field label="Installment Over" value={caseData.inst_over ? `₹${caseData.inst_over}` : "₹0"} />
+                  <Field label="Penalty Over" value={caseData.penal_over ? `₹${caseData.penal_over}` : "₹0"} />
+                  <Field label="Amount Outstanding" value={caseData.amt_outst ? `₹${caseData.amt_outst}` : "₹0"} highlight />                 
+                  <Field label="TOS" value={caseData.tos ? `₹${caseData.tos}` : "-"} />
                   <Field label="BOM Bucket" value={caseData.bom_bucket} />
-                  <Field label="Amount Finance" value={`₹${caseData.amount_finance || 0}`} />
+                  <Field label="Tenure" value={caseData.tenure ? `${caseData.tenure} Months` : "-"} />
+                  <Field label="Branch" value={caseData.branch_name} />
+                  <Field label="Penalty Interest" value={caseData.penal_intrst ? `₹${caseData.penal_intrst}` : "-"} />
+                  <Field label="Cheque Bounce Charge" value={caseData.chq_bnc_chrg ? `₹${caseData.chq_bnc_chrg}` : "-"} />                  
+                  <Field label="Last Paid Amount" value={caseData.last_paid_amount ? `₹${caseData.last_paid_amount}` : "-"} />
+                  <Field label="Last Paid Date" value={formatDateOnly(caseData.last_paid_date)} />
+                  <Field label="EMI Pending Count" value={caseData.emi_pending_count} />
+                  <Field label="SIF Allowed" value={caseData.sif_allowed} />
                 </Section>
 
+                {/* LOAN DETAILS */}
                 <Section title="Loan Details">
-                  <Field label="Branch" value={caseData.branch_name} />
-                  <Field label="Product" value={caseData.product_code} />
-                  <Field label="Loan Status" value={caseData.loan_status} />
-                  <Field label="Tenure" value={`${caseData.tenure || 0} Months`} />
+                  <Field label="Application ID" value={caseData.appl_id} />
+                  <Field label="Child Loan 1" value={caseData.child_loan1} />
+                  <Field label="Child Loan 2" value={caseData.child_loan2} />
+                  <Field label="Product Code" value={caseData.product_code} />
+                  <Field label="Product ID" value={caseData.product_id} />
+                  <Field label="DPD" value={caseData.dpd} />
+                  <Field label="Loan Status" value={caseData.loan_status} />                  
                   <Field label="Disbursement Date" value={formatDateOnly(caseData.disb_date)} />
                   <Field label="Maturity Date" value={formatDateOnly(caseData.maturity_date)} />
                   <Field label="FDD" value={formatDateOnly(caseData.fdd)} />
+                  <Field label="Fresh Vintage Regular" value={caseData.fresh_vintage_regular} />
                 </Section>
 
-                <Section title="Contact & Tracking">
+                {/* BANK & ASSET DETAILS */}
+                <Section title="Bank & Asset Details">
+                  <Field label="Bank Name" value={caseData.bank_name} />
+                  <Field label="Reason Bounce Cheque" value={caseData.reason_bounc_chek} />
+                  <Field label="Asset Category" value={caseData.asset_category} />
+                  <Field label="Asset Description" value={caseData.asset_desc} />
+                  <Field label="Disbursal Dealer" value={caseData.disb_dlr_name} />
+                  <Field label="Max Txn Entry Date" value={formatDateOnly(caseData.max_txn_entry_date)} />
+                  <Field label="Days Diff Max Txn" value={caseData.days_diff_max_txn_dt} />
+                  <Field label="Month Diff Exp Dt" value={caseData.month_diff_exp_dt} />
+                </Section>
+
+                {/* CONTACT & DEMOGRAPHICS */}
+                <Section title="Contact & Demographics">
+                  <Field label="Mobile No" value={caseData.phone || caseData.mobileno} highlight />
+                  <Field label="Alt Contact 1" value={caseData.contact_no1} />
+                  <Field label="Res. Phone" value={caseData.ph_no_res} />
+                  <Field label="DOB" value={formatDateOnly(caseData.dob)} />
+                  <Field label="Current Org" value={caseData.current_org} />
+                  <Field label="Group Name" value={caseData.group_name} />
+                  <Field label="Residence Address" value={caseData.res_addr} />
+                  <Field label="Office Address" value={caseData.off_addr} />
+                  <Field label="State" value={caseData.state} />
+                </Section>
+
+                {/* TRACKING & AGENCY */}
+                <Section title="Tracking & Agency">
+                  <Field label="Agency" value={caseData.agency} />
+                  <Field label="Hub Name" value={caseData.hub_name} />
                   <Field label="Allocation Date" value={formatFollowUp(caseData.allocation_date)} />
                   <Field label="First Call" value={formatFollowUp(caseData.first_call_at)} />
                   <Field label="Last Call" value={formatFollowUp(caseData.last_call_at)} />
                   <Field label="Scheduled Follow-up" value={formatFollowUp(caseData.follow_up_date, caseData.follow_up_time)} highlight />
-                  <Field label="Residence Address" value={caseData.res_addr} />
-                  <Field label="Office Address" value={caseData.off_addr} />
+                  <Field label="Old PTP Date" value={formatDateOnly(caseData.ptp_date)} />
+                  <Field label="Old Feedback" value={caseData.feedback} />
                 </Section>
 
-                <Section title="Data Information">
+                {/* SYSTEM DATA */}
+                <Section title="System Data">
+                  <Field label="Customer ID" value={caseData.cust_id} />
                   <Field label="Agent ID" value={caseData.agent_id} />
-                  <Field label="Batch Month" value={caseData.batch_month} />
-                  <Field label="Batch Year" value={caseData.batch_year} />
                   <Field label="Campaign ID" value={caseData.campaign_id} />
-                  <Field label="Is Active" value={caseData.is_active} />
+                  <Field label="Batch Month/Year" value={`${caseData.batch_month || '-'} / ${caseData.batch_year || '-'}`} />
+                  <Field label="Is Active" value={caseData.is_active === 1 ? "Yes" : "No"} />
                 </Section>
 
                 {/* DISPOSITION HISTORY (SMART RENDER) */}
