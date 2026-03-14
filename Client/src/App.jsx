@@ -11,6 +11,7 @@ import UploadData from "./pages/admin/UploadData";
 import ManageCampaigns from "./pages/admin/ManageCampaigns";
 import CampaignAgents from "./pages/admin/CampaignAgents";
 import MonitoringAnalytics from "./pages/admin/MonitoringAnalytics";
+import AdminCustomerSearch from "./pages/admin/AdminCustomerSearch";
 
 function App() {
   return (
@@ -106,7 +107,14 @@ function App() {
           </ProtectedRoute>
         }
       />
-
+      <Route
+        path="/admin/search"
+        element={
+          <ProtectedRoute allowedRoles={["ADMIN"]}>
+            <AdminCustomerSearch />
+          </ProtectedRoute>
+        }
+      />
     </Routes>
   );
 }

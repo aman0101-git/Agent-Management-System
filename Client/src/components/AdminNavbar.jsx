@@ -9,6 +9,7 @@ import {
   Database,
   FileSpreadsheet,
   LogOut,
+  Search,
   ShieldCheck
 } from "lucide-react";
 
@@ -23,7 +24,8 @@ const AdminNavbar = () => {
     { name: "Data", href: "/admin/upload-data", icon: Database },
     { name: "Campaigns", href: "/admin/campaigns", icon: Megaphone },
     { name: "Monitoring", href: "/admin/monitoring-analytics", icon: BarChart3 },
-    { name: "Exports", href: "/admin/file-exports", icon: FileSpreadsheet }
+    { name: "Exports", href: "/admin/file-exports", icon: FileSpreadsheet },
+    { name: "Search", href: "/admin/search", icon: Search },
   ];
 
   const isActive = (path) => location.pathname === path;

@@ -1,13 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
+// Import Agent APIs
 import {
-  fetchCaseDetails,
-  submitDisposition,
+  fetchCaseDetails as fetchAgentCaseDetails,
+  submitDisposition as submitAgentDisposition,
   fetchNextCase,
-  startCustomerVisit,
-  endCustomerVisit,
-  fetchCustomerVisitHistory,
-  fetchOnceConstraints,
+  startCustomerVisit as startAgentVisit,
+  endCustomerVisit as endAgentVisit,
+  fetchCustomerVisitHistory as fetchAgentVisitHistory,
+  fetchOnceConstraints as fetchAgentConstraints,
 } from "@/api/agentApi";
+// Import Admin APIs
+import {
+  fetchAdminCaseDetails,
+  submitAdminDisposition,
+  startAdminCustomerVisit,
+  endAdminCustomerVisit,
+  fetchAdminCustomerVisitHistory,
+  fetchAdminOnceConstraints,
+} from "@/api/adminApi";
+
 import { useAuth } from "@/context/AuthContext";
 import { DISPOSITIONS, requiresAmountAndDate, requiresAmount, requiresDateOnly, requiresPaymentDate } from "@/lib/dispositions";
 
@@ -38,24 +49,17 @@ const Field = ({ label, value, highlight }) => (
 
 const formatFollowUp = (date, time) => {
   if (!date) return "";
-
   let d;
-  // Case 1: date is already ISO (contains T)
   if (typeof date === "string" && date.includes("T")) {
     d = new Date(date);
-  }
-  // Case 2: date + time are separate
-  else if (time) {
+  } else if (time) {
     d = new Date(`${date}T${time}`);
-  }
-  // Case 3: date only
-  else {
+  } else {
     d = new Date(date);
   }
-
   if (isNaN(d.getTime())) return "";
 
-  const formattedDate = d.toLocaleDateString("en-GB"); // DD/MM/YYYY
+  const formattedDate = d.toLocaleDateString("en-GB"); 
   const formattedTime = d.toLocaleTimeString("en-US", {
     hour: "numeric",
     minute: "2-digit",
@@ -67,17 +71,14 @@ const formatFollowUp = (date, time) => {
 
 const formatDateOnly = (dateStr) => {
   if (!dateStr) return "-";
-  
   let d;
   if (typeof dateStr === "string" && dateStr.includes("T")) {
     d = new Date(dateStr);
   } else {
     d = new Date(dateStr);
   }
-  
   if (isNaN(d.getTime())) return "-";
-  
-  return d.toLocaleDateString("en-GB"); // DD/MM/YYYY
+  return d.toLocaleDateString("en-GB"); 
 };
 
 const CustomerDetailDrawer = ({
@@ -85,6 +86,7 @@ const CustomerDetailDrawer = ({
   isOpen,
   onClose,
   onDispositionSubmitted,
+  isAdmin = false // <--- ADDED ISADMIN PROP
 }) => {
   const { token } = useAuth();
 
@@ -94,7 +96,6 @@ const CustomerDetailDrawer = ({
   const [loading, setLoading] = useState(false);
   const [showEditHistory, setShowEditHistory] = useState(false);
   const [showEditHistoryModal, setShowEditHistoryModal] = useState(false);
-  const [visitId, setVisitId] = useState(null);
   const [visitHistory, setVisitHistory] = useState([]);
 
   // Form state
@@ -109,17 +110,23 @@ const CustomerDetailDrawer = ({
   const [ptpTarget, setPtpTarget] = useState("");
   const [paymentDate, setPaymentDate] = useState("");
   const [paymentTime, setPaymentTime] = useState("");
-  // Helper: should show payment date/time field
+  
   const paymentDateDispositions = ['PIF', 'SIF', 'FCL'];
   const shouldShowPaymentDate = paymentDateDispositions.includes(selectedDisposition);
 
   const [onceConstraints, setOnceConstraints] = useState({});
-  // Fetch ONCE_PTP/ONCE_PRT constraints when drawer opens
+
+  // === STRICT MODE ANTI-DUPLICATE GUARDS ===
+  const hasStartedVisitRef = useRef(false);
+  const activeVisitIdRef = useRef(null);
+
+  // 1. Constraints API logic
   useEffect(() => {
     const loadOnceConstraints = async () => {
-      if (isOpen && caseData && caseData.id) {
+      if (isOpen && caseData?.id) {
+        const fetchConstraintsApi = isAdmin ? fetchAdminOnceConstraints : fetchAgentConstraints;
         try {
-          const res = await fetchOnceConstraints(caseData.id, token);
+          const res = await fetchConstraintsApi(caseData.id, token);
           const map = {};
           (res.constraints || []).forEach((c) => {
             map[c.constraint_type] = c.triggered_at;
@@ -133,70 +140,65 @@ const CustomerDetailDrawer = ({
       }
     };
     loadOnceConstraints();
-  }, [isOpen, caseData, token]);
+  }, [isOpen, caseData?.id, token, isAdmin]);
   
+  // 2. Load Case Details when opened
   useEffect(() => {
     if (isOpen && caseId) {
       loadCaseDetails();
     }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen, caseId]);
 
-  // FIX: Concurrency-Safe Visit Tracking (Kept perfectly intact)
+  // 3. ROCK SOLID VISIT TRACKING (No Duplicates)
   useEffect(() => {
-    let activeVisitId = null;
-    let isMounted = true; 
-
-    const manageVisit = async () => {
-      if (!isOpen || !caseId) return;
-
-      try {
-        const res = await startCustomerVisit(caseId, token);
-        
-        if (res?.visit_id) {
-          if (isMounted) {
-            setVisitId(res.visit_id);
-            activeVisitId = res.visit_id;
-          } else {
-            endCustomerVisit(res.visit_id, token).catch((err) =>
-              console.error("Closed orphaned visit", err)
-            );
+    if (isOpen && caseId && !hasStartedVisitRef.current) {
+      hasStartedVisitRef.current = true; // Lock immediately to prevent double fires
+      
+      const startVisitApi = isAdmin ? startAdminCustomerVisit : startAgentVisit;
+      
+      startVisitApi(caseId, token)
+        .then(res => {
+          if (res?.visit_id) {
+            activeVisitIdRef.current = res.visit_id;
           }
-        }
-      } catch (err) {
-        console.error('Failed to start visit', err);
-      }
-    };
+        })
+        .catch(err => console.error('Failed to start visit', err));
+    }
 
-    manageVisit();
-
+    // Cleanup: Only run when the drawer is actually closing
     return () => {
-      isMounted = false; 
-      if (activeVisitId) {
-        endCustomerVisit(activeVisitId, token).catch((err) => 
-          console.error('Failed to auto-close visit on exit', err)
-        );
+      if (!isOpen && hasStartedVisitRef.current) {
+        if (activeVisitIdRef.current) {
+          const endVisitApi = isAdmin ? endAdminCustomerVisit : endAgentVisit;
+          endVisitApi(activeVisitIdRef.current, token).catch(err => 
+            console.error('Failed to end visit', err)
+          );
+          activeVisitIdRef.current = null; // Clear ID
+        }
+        hasStartedVisitRef.current = false; // Unlock for next open
       }
     };
-  }, [isOpen, caseId, token]);
+  }, [isOpen, caseId, token, isAdmin]);
   
   const loadCaseDetails = async () => {
     try {
       setLoading(true);
-      const res = await fetchCaseDetails(caseId, token);
+      const fetchDetailsApi = isAdmin ? fetchAdminCaseDetails : fetchAgentCaseDetails;
+      const res = await fetchDetailsApi(caseId, token);
       const data = res.case || {};
 
       if (typeof data.extra_fields === "string") {
-        try {
-          data.extra_fields = JSON.parse(data.extra_fields);
-        } catch { /* ignore parse errors for extra_fields */ }
+        try { data.extra_fields = JSON.parse(data.extra_fields); } catch { /* ignore parse errors */ }
       }
 
       setCaseData(data);
       setDispositions(res.dispositions || []);
       setEditHistory(res.editHistory || []);
-      // Load visit history for this customer
+      
       try {
-        const hist = await fetchCustomerVisitHistory(caseId, token);
+        const fetchHistoryApi = isAdmin ? fetchAdminCustomerVisitHistory : fetchAgentVisitHistory;
+        const hist = await fetchHistoryApi(caseId, token);
         setVisitHistory(hist.history || []);
       } catch (err) {
         console.error('Failed to fetch visit history', err);
@@ -224,33 +226,19 @@ const CustomerDetailDrawer = ({
   const handleSubmitDisposition = async (e) => {
     e.preventDefault();
 
-    if (!selectedDisposition) {
-      alert("Please select a disposition");
-      return;
-    }
+    if (!selectedDisposition) { alert("Please select a disposition"); return; }
 
     if (requiresAmount(selectedDisposition) && !promiseAmount) {
-      alert("Promise amount is required for this disposition");
-      return;
+      alert("Promise amount is required for this disposition"); return;
     }
 
-    if (
-      requiresAmountAndDate(selectedDisposition) ||
-      selectedDisposition === "PRT"
-    ) {
-      if (!followUpDate) {
-        alert("Follow-up date is required for this disposition");
-        return;
-      }
-      if (!followUpTime) {
-        alert("Follow-up time is required for this disposition");
-        return;
-      }
+    if (requiresAmountAndDate(selectedDisposition) || selectedDisposition === "PRT") {
+      if (!followUpDate) { alert("Follow-up date is required for this disposition"); return; }
+      if (!followUpTime) { alert("Follow-up time is required for this disposition"); return; }
     }
 
     if ((shouldShowPaymentDate || (selectedDisposition === 'PRT' && requiresPaymentDate('PRT'))) && (!paymentDate || !paymentTime)) {
-      alert('Payment date and time are required for this disposition');
-      return;
+      alert('Payment date and time are required for this disposition'); return;
     }
 
     try {
@@ -269,22 +257,19 @@ const CustomerDetailDrawer = ({
         agentCaseId: editingAgentCaseId,
       };
 
-      const res = await submitDisposition(caseId, submissionData, token);
+      const submitDispApi = isAdmin ? submitAdminDisposition : submitAgentDisposition;
+      const res = await submitDispApi(caseId, submissionData, token);
 
-      if (res.allocateNext || res.allocateNextOnStatusChange) {
-        try {
-          await fetchNextCase(token);
-        } catch { /* allocation attempt failed */ }
+      if (!isAdmin && (res.allocateNext || res.allocateNextOnStatusChange)) {
+        try { await fetchNextCase(token); } catch { /* allocation attempt failed */ }
       }
 
-      if (visitId) {
-        try {
-          await endCustomerVisit(visitId, token);
-        } catch (err) {
-          console.error('Failed to end visit after disposition', err);
-        } finally {
-          setVisitId(null);
-        }
+      // Manually trigger the end visit API so it registers immediately before data reload
+      if (activeVisitIdRef.current) {
+        const endVisitApi = isAdmin ? endAdminCustomerVisit : endAgentVisit;
+        await endVisitApi(activeVisitIdRef.current, token).catch(console.error);
+        activeVisitIdRef.current = null;
+        hasStartedVisitRef.current = false;
       }
 
       await loadCaseDetails();
@@ -293,8 +278,7 @@ const CustomerDetailDrawer = ({
     } catch (err) {
       console.error('Disposition submission error:', err);
       if (err.errors && Array.isArray(err.errors)) {
-        const errorList = err.errors.join('\n');
-        alert(`Validation failed:\n\n${errorList}`);
+        alert(`Validation failed:\n\n${err.errors.join('\n')}`);
       } else if (err.message) {
         alert(`Error: ${err.message}`);
       } else {
@@ -311,30 +295,17 @@ const CustomerDetailDrawer = ({
     setSelectedDisposition(d.disposition || "");
     setRemarks(d.remarks || "");
     setPromiseAmount(d.promise_amount || "");
-    setFollowUpDate(
-      d.follow_up_date ? d.follow_up_date.split("T")[0] : ""
-    );
+    setFollowUpDate(d.follow_up_date ? d.follow_up_date.split("T")[0] : "");
     setFollowUpTime(d.follow_up_time || "");
     setPtpTarget(d.ptp_target || "");
-    setPaymentDate(
-      d.payment_date ? d.payment_date.split("T")[0] : ""
-    );
+    setPaymentDate(d.payment_date ? d.payment_date.split("T")[0] : "");
     setPaymentTime(d.payment_time || "");
 
-    // Smooth scroll to form
     document.getElementById("disposition-form")?.scrollIntoView({ behavior: "smooth" });
   };
 
-  const handleInternalClose = async () => {
-    if (visitId) {
-      try {
-        await endCustomerVisit(visitId, token);
-      } catch (err) {
-        console.error('Failed to end visit on close', err);
-      } finally {
-        setVisitId(null);
-      }
-    }
+  // We no longer manually call endVisit here; setting isOpen to false via onClose triggers the useEffect cleanup automatically.
+  const handleInternalClose = () => {
     onClose?.();
   };
 
@@ -391,13 +362,13 @@ const CustomerDetailDrawer = ({
                   <Field label="Installment Amount" value={caseData.insl_amt ? `₹${caseData.insl_amt}` : "₹0"} />
                   <Field label="Installment Over" value={caseData.inst_over ? `₹${caseData.inst_over}` : "₹0"} />
                   <Field label="Penalty Over" value={caseData.penal_over ? `₹${caseData.penal_over}` : "₹0"} />
-                  <Field label="Amount Outstanding" value={caseData.amt_outst ? `₹${caseData.amt_outst}` : "₹0"} highlight />                 
+                  <Field label="Amount Outstanding" value={caseData.amt_outst ? `₹${caseData.amt_outst}` : "₹0"} highlight />                
                   <Field label="TOS" value={caseData.tos ? `₹${caseData.tos}` : "-"} />
                   <Field label="BOM Bucket" value={caseData.bom_bucket} />
                   <Field label="Tenure" value={caseData.tenure ? `${caseData.tenure} Months` : "-"} />
                   <Field label="Branch" value={caseData.branch_name} />
                   <Field label="Penalty Interest" value={caseData.penal_intrst ? `₹${caseData.penal_intrst}` : "-"} />
-                  <Field label="Cheque Bounce Charge" value={caseData.chq_bnc_chrg ? `₹${caseData.chq_bnc_chrg}` : "-"} />                  
+                  <Field label="Cheque Bounce Charge" value={caseData.chq_bnc_chrg ? `₹${caseData.chq_bnc_chrg}` : "-"} />                 
                   <Field label="Last Paid Amount" value={caseData.last_paid_amount ? `₹${caseData.last_paid_amount}` : "-"} />
                   <Field label="Last Paid Date" value={formatDateOnly(caseData.last_paid_date)} />
                   <Field label="EMI Pending Count" value={caseData.emi_pending_count} />
@@ -412,7 +383,7 @@ const CustomerDetailDrawer = ({
                   <Field label="Product Code" value={caseData.product_code} />
                   <Field label="Product ID" value={caseData.product_id} />
                   <Field label="DPD" value={caseData.dpd} />
-                  <Field label="Loan Status" value={caseData.loan_status} />                  
+                  <Field label="Loan Status" value={caseData.loan_status} />                 
                   <Field label="Disbursement Date" value={formatDateOnly(caseData.disb_date)} />
                   <Field label="Maturity Date" value={formatDateOnly(caseData.maturity_date)} />
                   <Field label="FDD" value={formatDateOnly(caseData.fdd)} />
@@ -488,6 +459,7 @@ const CustomerDetailDrawer = ({
                                 </div>
                                 <p className="text-sm text-slate-600 mt-2">
                                   Recorded on: <span className="font-medium">{latest.created_at ? new Date(latest.created_at).toLocaleString("en-IN") : "-"}</span>
+                                  {latest.agent_name && <span className="ml-2 text-indigo-600 font-semibold">(by {latest.agent_name})</span>}
                                 </p>
                               </div>
                             </div>
@@ -505,7 +477,7 @@ const CustomerDetailDrawer = ({
                             </div>
                             {latest.remarks && <p className="mt-3 text-sm text-slate-700 italic border-l-2 border-slate-300 pl-2">"{latest.remarks}"</p>}
 
-                            {/* 2. UPDATE THIS BUTTON BLOCK */}
+                            {/* BUTTON BLOCK */}
                             {(isPTP || isPRT || isTerminal) && !isEditing && (
                               <div className="mt-4 pt-4 border-t border-slate-200/60 flex flex-wrap gap-3">
                                 
@@ -555,7 +527,6 @@ const CustomerDetailDrawer = ({
                           {showEditHistory && (
                             <div className="mt-4 space-y-2 max-h-48 overflow-y-auto pr-2 custom-scrollbar">
                               {dispositions.slice(1).map((d, i) => {
-                                // Determine badge colors based on disposition type
                                 const isPTP = d.disposition === 'PTP';
                                 const isPRT = d.disposition === 'PRT';
                                 const isTerminal = ['PIF', 'SIF', 'FCL'].includes(d.disposition);
@@ -567,7 +538,6 @@ const CustomerDetailDrawer = ({
                                   ? 'bg-emerald-100 text-emerald-800 border-emerald-200' 
                                   : 'bg-slate-100 text-slate-700 border-slate-200';
 
-                                // Format date and time safely
                                 const dateObj = d.created_at ? new Date(d.created_at) : null;
                                 const dateStr = dateObj ? dateObj.toLocaleDateString("en-IN", { day: 'numeric', month: 'short', year: 'numeric' }) : "-";
                                 const timeStr = dateObj ? dateObj.toLocaleTimeString("en-IN", { hour: 'numeric', minute: '2-digit', hour12: true }) : "";
@@ -581,6 +551,7 @@ const CustomerDetailDrawer = ({
                                     <div className="flex-shrink-0 w-24 sm:w-28 flex flex-col">
                                       <span className="text-xs font-bold text-slate-700">{dateStr}</span>
                                       <span className="text-[10px] font-medium text-slate-500">{timeStr}</span>
+                                      {d.agent_name && <span className="text-[10px] font-semibold text-indigo-600 truncate">{d.agent_name}</span>}
                                     </div>
 
                                     {/* Disposition Badge */}
@@ -590,13 +561,10 @@ const CustomerDetailDrawer = ({
                                       </span>
                                     </div>
 
-                                    {/* Remarks (Truncated to single line) */}
+                                    {/* Remarks */}
                                     <div className="flex-1 min-w-0">
                                       {d.remarks ? (
-                                        <p 
-                                          className="text-xs sm:text-sm text-slate-600 truncate" 
-                                          title={d.remarks} // Tooltip on hover
-                                        >
+                                        <p className="text-xs sm:text-sm text-slate-600 truncate" title={d.remarks}>
                                           {d.remarks}
                                         </p>
                                       ) : (
@@ -636,12 +604,12 @@ const CustomerDetailDrawer = ({
                       <h3 className={`text-lg font-bold flex items-center gap-2 ${isEditing ? 'text-indigo-800' : 'text-slate-800'}`}>
                         {isEditing ? (
                           <><span>✏️ Updating Existing State:</span> <span className="bg-indigo-200 px-2 py-0.5 rounded text-sm">{selectedDisposition}</span></>
-                        ) : "📝 Submit New Disposition"}
+                        ) : isAdmin ? "🛠️ Admin Override: Submit New Disposition" : "📝 Submit New Disposition"}
                       </h3>
                       <p className="text-xs text-slate-500 mt-1">
                         {isEditing 
                           ? "You are updating a previously logged status. This will NOT add duplicate amounts to analytics." 
-                          : "Logging a new disposition will overwrite the current active status and add new financial events."}
+                          : isAdmin ? "As an Admin, your submission will be logged under your account." : "Logging a new disposition will overwrite the current active status and add new financial events."}
                       </p>
                     </div>
 
@@ -658,7 +626,7 @@ const CustomerDetailDrawer = ({
                         </div>
                         
                         <div>
-                          <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Agent Remarks</label>
+                          <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">Remarks</label>
                           <textarea value={remarks} onChange={(e) => setRemarks(e.target.value)} placeholder="Detailed notes about the conversation..." rows={3} className="w-full border-slate-300 rounded-lg shadow-sm focus:border-indigo-500 focus:ring-indigo-500 p-3 text-sm resize-none bg-white" />
                         </div>
                       </div>
@@ -741,7 +709,6 @@ const CustomerDetailDrawer = ({
                         {visitHistory.map((v, i) => {
                           const inProgress = v.entry_time && !v.exit_time;
 
-                          // Calculate duration
                           let durationStr = "";
                           if (v.entry_time && v.exit_time) {
                             const diffMs = new Date(v.exit_time) - new Date(v.entry_time);
@@ -750,21 +717,17 @@ const CustomerDetailDrawer = ({
                             else durationStr = `${Math.floor(diffMins / 60)}h ${diffMins % 60}m`;
                           }
 
-                          // Format Times
                           const entryTime = v.entry_time ? new Date(v.entry_time).toLocaleTimeString("en-IN", { hour: 'numeric', minute: '2-digit', hour12: true }) : "-";
                           const exitTime = v.exit_time ? new Date(v.exit_time).toLocaleTimeString("en-IN", { hour: 'numeric', minute: '2-digit', hour12: true }) : "-";
                           const dateStr = v.entry_time ? new Date(v.entry_time).toLocaleDateString("en-IN", { day: 'numeric', month: 'short' }) : "";
 
                           return (
                             <div key={i} className="relative group">
-                              {/* Timeline Dot */}
                               <div className={`absolute -left-[27px] top-1/2 -translate-y-1/2 h-3.5 w-3.5 rounded-full border-[2px] border-white shadow-sm ${inProgress ? 'bg-green-500 animate-pulse' : 'bg-indigo-400'}`}></div>
                               
-                              {/* Visit Row */}
                               <div className={`flex items-center justify-between p-3 rounded-lg border transition-all ${inProgress ? 'bg-green-50/40 border-green-200 shadow-sm' : 'bg-white border-slate-200 hover:shadow-sm hover:border-indigo-200'}`}>
                                 
                                 <div className="flex items-center gap-4 sm:gap-6 overflow-hidden">
-                                  {/* Agent Info */}
                                   <div className="flex items-center gap-2 min-w-[120px]">
                                     <div className={`p-1 rounded-full ${inProgress ? 'bg-green-100 text-green-600' : 'bg-indigo-50 text-indigo-600'}`}>
                                       <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" viewBox="0 0 20 20" fill="currentColor">
@@ -774,7 +737,6 @@ const CustomerDetailDrawer = ({
                                     <p className="font-semibold text-slate-800 text-sm truncate">{v.username}</p>
                                   </div>
 
-                                  {/* Time Range & Duration */}
                                   <div className="flex items-center gap-3 text-xs hidden sm:flex">
                                     <span className="text-slate-500 font-medium bg-slate-100 px-2 py-0.5 rounded-md">{dateStr}</span>
                                     <span className="text-slate-600">
@@ -789,7 +751,6 @@ const CustomerDetailDrawer = ({
                                   </div>
                                 </div>
 
-                                {/* Disposition Badge */}
                                 <span className={`flex-shrink-0 ml-4 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded border ${v.disposition ? 'bg-indigo-50 text-indigo-700 border-indigo-200' : 'bg-slate-50 text-slate-500 border-slate-200'}`}>
                                   {v.disposition || "Viewed Only"}
                                 </span>
@@ -809,7 +770,7 @@ const CustomerDetailDrawer = ({
         </div>
       </div>
 
-      {/* RESTORED: EDIT HISTORY MODAL */}
+      {/* EDIT HISTORY MODAL */}
       {showEditHistoryModal && editHistory.length > 1 && (
         <>
           <div 
