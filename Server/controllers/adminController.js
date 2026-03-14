@@ -1,5 +1,6 @@
 import ExcelJS from "exceljs";
 import pool from "../config/mysql.js";
+import { DISPOSITION_RULES, getResultStatus } from '../config/dispositionRules.js';
 
 export const exportMasterData = async (req, res) => {
   try {
@@ -449,4 +450,284 @@ export const deleteAgentTarget = async (req, res) => {
     console.error("deleteAgentTarget error:", err);
     res.status(500).json({ message: "Failed to delete target" });
   }
+};
+
+/**
+ * POST /api/admin/search
+ * Global search across all customers
+ */
+export const searchGlobalCustomers = async (req, res) => {
+  try {
+    const { query } = req.body;
+    if (!query || query.trim().length === 0) {
+      return res.status(400).json({ message: "Search query required" });
+    }
+
+    const searchTerm = `%${query}%`;
+
+    const [customers] = await pool.query(
+      `SELECT c.*, 
+        (SELECT status FROM agent_cases ac WHERE ac.coll_data_id = c.id ORDER BY created_at DESC LIMIT 1) as loan_status
+       FROM coll_data c
+       WHERE c.loan_agreement_no LIKE ? OR c.cust_name LIKE ? OR c.mobileno LIKE ?
+       ORDER BY c.id DESC LIMIT 50`,
+      [searchTerm, searchTerm, searchTerm]
+    );
+
+    res.json({ data: customers, count: customers.length });
+  } catch (err) {
+    console.error("searchGlobalCustomers error:", err);
+    res.status(500).json({ message: "Failed to search customers globally" });
+  }
+};
+
+/**
+ * GET /api/admin/cases/:caseId
+ * Fetch single case globally (No campaign/agent restrictions)
+ */
+export const getAdminCaseById = async (req, res) => {
+  try {
+    const { caseId } = req.params;
+
+    // 1. Fetch main case details
+    const [[row]] = await pool.query(
+      `SELECT c.*, 
+        c.created_at AS allocation_date, c.cust_name AS customer_name, c.mobileno AS phone, c.loan_agreement_no AS loan_id,
+        COALESCE(ac.status, 'NEW') AS status, ac.first_call_at, ac.last_call_at, ac.follow_up_date, ac.follow_up_time
+       FROM coll_data c
+       LEFT JOIN agent_cases ac ON ac.coll_data_id = c.id
+       WHERE c.id = ?
+       ORDER BY ac.created_at DESC LIMIT 1`,
+      [caseId]
+    );
+
+    if (!row) return res.status(404).json({ message: "Case not found" });
+
+    // 2. Fetch Disposition History
+    const [dispositions] = await pool.query(
+      `SELECT ad.*, u.username AS agent_name
+       FROM agent_dispositions ad
+       INNER JOIN agent_cases ac ON ad.agent_case_id = ac.id
+       LEFT JOIN users u ON ad.agent_id = u.id
+       WHERE ac.coll_data_id = ?
+       ORDER BY ad.created_at DESC`,
+      [caseId]
+    );
+
+    // 3. Fetch Edit History
+    const [editHistory] = await pool.query(
+      `SELECT eh.* FROM agent_dispositions_edit_history eh
+       INNER JOIN agent_cases ac ON eh.agent_case_id = ac.id
+       WHERE ac.coll_data_id = ? ORDER BY eh.edited_at DESC`,
+      [caseId]
+    );
+
+    function formatTime(val) {
+      if (!val) return null;
+      if (typeof val === 'string') return val;
+      if (val instanceof Date) return val.toTimeString().slice(0, 8);
+      return String(val);
+    }
+
+    if (row.follow_up_time) row.follow_up_time = formatTime(row.follow_up_time);
+    dispositions.forEach(d => { if (d.follow_up_time) d.follow_up_time = formatTime(d.follow_up_time); });
+    editHistory.forEach(e => { if (e.follow_up_time) e.follow_up_time = formatTime(e.follow_up_time); });
+
+    return res.json({ case: row, dispositions, editHistory });
+  } catch (err) {
+    console.error("getAdminCaseById error:", err);
+    return res.status(500).json({ message: "Failed to fetch case details" });
+  }
+};
+
+/**
+ * POST /api/admin/cases/:caseId/disposition
+ * Admin submits disposition. Associates with the latest agent_case or creates a new one.
+ */
+export const submitAdminDisposition = async (req, res) => {
+  const conn = await pool.getConnection();
+  try {
+    const adminId = req.user.id;
+    const { caseId } = req.params;
+    const { disposition, remarks, promiseAmount, followUpDate, followUpTime, ptpTarget, paymentDate, paymentTime, isEdit } = req.body;
+
+    const rule = DISPOSITION_RULES[disposition];
+    if (!rule) return res.status(400).json({ message: `Unknown disposition: ${disposition}` });
+
+    await conn.beginTransaction();
+
+    // Find the latest agent_case for this customer, regardless of who owns it
+    let [[agentCase]] = await conn.query(
+      `SELECT id, status, coll_data_id, first_call_at FROM agent_cases WHERE coll_data_id = ? ORDER BY created_at DESC LIMIT 1 FOR UPDATE`,
+      [caseId]
+    );
+
+    // If customer has NO agent_case at all, create an initial one to attach the disposition to
+    if (!agentCase) {
+      const [newCase] = await conn.query(
+        `INSERT INTO agent_cases (agent_id, coll_data_id, status, is_active, created_at) VALUES (?, ?, 'NEW', 1, NOW())`,
+        [adminId, caseId] // Log it under admin's ID
+      );
+      agentCase = { id: newCase.insertId, status: 'NEW', coll_data_id: caseId, first_call_at: null };
+    }
+
+    const collDataId = agentCase.coll_data_id;
+
+    // Handle Edit History (Admin overriding existing disposition)
+    let targetDispositionId = null;
+    if (isEdit) {
+      const [[latest]] = await conn.query(`SELECT * FROM agent_dispositions WHERE agent_case_id = ? ORDER BY id DESC LIMIT 1 FOR UPDATE`, [agentCase.id]);
+      if (latest) {
+        targetDispositionId = latest.id;
+        await conn.query(
+          `INSERT INTO agent_dispositions_edit_history (agent_case_id, disposition, remarks, promise_amount, follow_up_date, follow_up_time, ptp_target)
+           VALUES (?, ?, ?, ?, ?, ?, ?)`,
+          [agentCase.id, latest.disposition, latest.remarks, latest.promise_amount, latest.follow_up_date, latest.follow_up_time, latest.ptp_target]
+        );
+      }
+    }
+
+    // Insert or Update Disposition (Using Admin's ID)
+    let insertedDispositionId;
+    if (isEdit && targetDispositionId) {
+      await conn.query(
+        `UPDATE agent_dispositions SET disposition = ?, ptp_target = ?, remarks = ?, promise_amount = ?, follow_up_date = ?, follow_up_time = ?, payment_date = ?, payment_time = ?, created_at = NOW() WHERE id = ?`,
+        [disposition, ptpTarget || null, remarks || null, promiseAmount || null, followUpDate || null, followUpTime || null, paymentDate || null, paymentTime || null, targetDispositionId]
+      );
+      insertedDispositionId = targetDispositionId;
+    } else {
+      const [result] = await conn.query(
+        `INSERT INTO agent_dispositions (agent_case_id, agent_id, disposition, ptp_target, remarks, promise_amount, follow_up_date, follow_up_time, payment_date, payment_time, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
+        [agentCase.id, adminId, disposition, ptpTarget || null, remarks || null, promiseAmount || null, followUpDate || null, followUpTime || null, paymentDate || null, paymentTime || null]
+      );
+      insertedDispositionId = result.insertId;
+    }
+
+    // Constraints and Case Status updates
+    if (disposition === 'PTP' || disposition === 'PRT') {
+      const constraintType = disposition === 'PTP' ? 'ONCE_PTP' : 'ONCE_PRT';
+      await conn.query(
+        `INSERT INTO customer_once_constraints (coll_data_id, constraint_type, triggered_disposition_id, triggered_at, is_active) VALUES (?, ?, ?, NOW(), 1)
+         ON DUPLICATE KEY UPDATE triggered_disposition_id = VALUES(triggered_disposition_id), triggered_at = NOW(), is_active = 1`,
+        [collDataId, constraintType, insertedDispositionId]
+      );
+    }
+
+    const newStatus = getResultStatus(disposition);
+    await conn.query(
+      `UPDATE agent_cases SET status = ?, is_active = 0, first_call_at = ?, last_call_at = NOW(), follow_up_date = ?, follow_up_time = ? WHERE id = ?`,
+      [newStatus, agentCase.first_call_at || new Date(), followUpDate || null, followUpTime || null, agentCase.id]
+    );
+
+    if (newStatus === "DONE") {
+      await conn.query(`UPDATE customer_once_constraints SET is_active = 0 WHERE coll_data_id = ?`, [collDataId]);
+    }
+
+    await conn.commit();
+    return res.json({ message: "Admin Disposition saved successfully", status: newStatus });
+  } catch (err) {
+    await conn.rollback();
+    console.error("submitAdminDisposition error:", err);
+    return res.status(500).json({ message: "Failed to submit disposition", error: err.message });
+  } finally {
+    conn.release();
+  }
+};
+
+// --- Admin Visit History Endpoints ---
+
+export const startAdminCustomerVisit = async (req, res) => {
+  try {
+    const admin_id = req.user.id;
+    const { customer_id } = req.body;
+
+    // 1. Check for EXISTING open visit
+    const [existing] = await pool.query(
+      `SELECT id, entry_time FROM agent_customer_visits 
+       WHERE agent_id = ? AND customer_id = ? AND exit_time IS NULL
+       LIMIT 1`,
+      [admin_id, customer_id]
+    );
+
+    if (existing.length > 0) {
+      const visit = existing[0];
+      const visitTime = new Date(visit.entry_time).getTime();
+      const hoursDiff = (Date.now() - visitTime) / (1000 * 60 * 60);
+
+      // 2. SAFETY: If the open visit is > 12 hours old, close it.
+      if (hoursDiff > 12) {
+        await pool.query(`UPDATE agent_customer_visits SET exit_time = NOW() WHERE id = ?`, [visit.id]);
+      } else {
+        // 3. Resume it
+        return res.json({ visit_id: visit.id, status: 'resumed' });
+      }
+    }
+
+    // 4. Create NEW Visit
+    const [result] = await pool.query(
+      `INSERT INTO agent_customer_visits (agent_id, customer_id, entry_time) VALUES (?, ?, NOW())`,
+      [admin_id, customer_id]
+    );
+
+    return res.json({ visit_id: result.insertId, status: 'started' });
+  } catch (err) {
+    console.error("startAdminCustomerVisit error:", err);
+    res.status(500).json({ message: 'Failed to start visit' });
+  }
+};
+
+export const endAdminCustomerVisit = async (req, res) => {
+  try {
+    const { visit_id } = req.body;
+    if (!visit_id) return res.status(400).json({ message: "visit_id is required" });
+
+    await pool.query(`UPDATE agent_customer_visits SET exit_time = NOW() WHERE id = ?`, [visit_id]);
+    res.json({ message: 'Visit ended' });
+  } catch (err) { 
+    res.status(500).json({ message: 'Failed to end visit' }); 
+  }
+};
+
+export const getAdminCustomerVisitHistory = async (req, res) => {
+  try {
+    const { customerId } = req.params;
+    
+    // Exact same rich query as the Agent uses
+    const [history] = await pool.query(
+      `
+      SELECT 
+        acv.entry_time, 
+        acv.exit_time,
+        u.username,
+        (
+          SELECT ad.disposition
+          FROM agent_dispositions ad
+          JOIN agent_cases ac ON ad.agent_case_id = ac.id
+          WHERE ac.coll_data_id = acv.customer_id
+            AND ad.agent_id = acv.agent_id
+            AND ad.created_at >= acv.entry_time
+            AND (acv.exit_time IS NULL OR ad.created_at <= acv.exit_time)
+          ORDER BY ad.created_at DESC
+          LIMIT 1
+        ) AS disposition
+      FROM agent_customer_visits acv
+      LEFT JOIN users u ON u.id = acv.agent_id
+      WHERE acv.customer_id = ? 
+      ORDER BY acv.entry_time DESC
+      LIMIT 50
+      `, [customerId]
+    );
+    res.json({ history });
+  } catch (err) { 
+    res.status(500).json({ message: 'Failed to fetch history' }); 
+  }
+};
+
+export const getAdminOnceConstraints = async (req, res) => {
+  try {
+    const { collDataId } = req.params;
+    const [rows] = await pool.query(`SELECT constraint_type, triggered_at FROM customer_once_constraints WHERE coll_data_id = ? AND is_active = 1`, [collDataId]);
+    res.json({ constraints: rows });
+  } catch (err) { res.status(500).json({ message: 'Failed to fetch once constraints' }); }
 };

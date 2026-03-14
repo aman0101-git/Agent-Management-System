@@ -20,7 +20,28 @@ import {
   exportMonitoringDrilldown,
 } from '../controllers/adminMonitoringController.js';
 
+import {
+  searchGlobalCustomers,
+  getAdminCaseById,
+  submitAdminDisposition,
+  startAdminCustomerVisit,
+  endAdminCustomerVisit,
+  getAdminCustomerVisitHistory,
+  getAdminOnceConstraints
+} from '../controllers/adminController.js';
+
 const router = express.Router();
+
+// === GLOBAL CUSTOMER SEARCH & DISPOSITION ===
+router.post('/search', protect, allowRoles('ADMIN'), searchGlobalCustomers);
+router.get('/cases/:caseId', protect, allowRoles('ADMIN'), getAdminCaseById);
+router.post('/cases/:caseId/disposition', protect, allowRoles('ADMIN'), submitAdminDisposition);
+
+// === ADMIN VISIT HISTORY ===
+router.post('/customer-visit/start', protect, allowRoles('ADMIN'), startAdminCustomerVisit);
+router.post('/customer-visit/end', protect, allowRoles('ADMIN'), endAdminCustomerVisit);
+router.get('/customer-visit/history/:customerId', protect, allowRoles('ADMIN'), getAdminCustomerVisitHistory);
+router.get('/customers/:collDataId/once-constraints', protect, allowRoles('ADMIN'), getAdminOnceConstraints);
 
 /**
  * GET /api/admin/exports/master
