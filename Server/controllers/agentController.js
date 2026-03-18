@@ -541,7 +541,6 @@ export const searchCustomers = async (req, res) => {
 /**
  * GET /api/agent/analytics
  * Get performance analytics for logged-in agent with time filtering
- * FIX: Utilizes Latest-State Logic for PTP to prevent duplicates and broken PTPs adding up
  */
 export const getAgentAnalytics = async (req, res) => {
   try {
@@ -622,6 +621,7 @@ export const getAgentAnalytics = async (req, res) => {
 
     /* ==========================================
        SECTION A: COLLECTION BREAKDOWN (PRT/PIF/SIF/FCL)
+       ✅ FIXED: Now specifically targets the MAX(id) of PAYMENT statuses only
        ========================================== */
     const [breakdownRows] = await pool.query(
       `
@@ -637,22 +637,32 @@ export const getAgentAnalytics = async (req, res) => {
             SELECT agent_case_id, MAX(id) AS latest_id
             FROM agent_dispositions
             WHERE agent_id = ? AND created_at BETWEEN ? AND ?
+              AND disposition IN ('PIF','SIF','FCL','PRT') -- 🟢 FIX: Forces it to find the latest PAYMENT, ignoring subsequent PTP/CBs
             GROUP BY agent_case_id
           ) latest ON latest.latest_id = ad.id
-          WHERE ad.disposition IN ('PIF','SIF','FCL','PRT')
         ) latest_status
       JOIN 
         (
-          SELECT agent_case_id, SUM(promise_amount) as total_paid
-          FROM agent_dispositions
-          WHERE agent_id = ? 
-            AND created_at BETWEEN ? AND ?
-            AND disposition IN ('PIF','SIF','FCL','PRT')
-          GROUP BY agent_case_id
+          SELECT ad.agent_case_id, 
+            COALESCE(SUM(CASE WHEN ad.disposition = 'PRT' THEN ad.promise_amount ELSE 0 END), 0) +
+            COALESCE((
+              SELECT promise_amount FROM agent_dispositions ad_sub 
+              WHERE ad_sub.agent_case_id = ad.agent_case_id AND ad_sub.disposition IN ('PIF','SIF','FCL') AND ad_sub.created_at BETWEEN ? AND ?
+              ORDER BY ad_sub.id DESC LIMIT 1
+            ), 0) AS total_paid
+          FROM agent_dispositions ad
+          WHERE ad.agent_id = ? 
+            AND ad.created_at BETWEEN ? AND ?
+            AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+          GROUP BY ad.agent_case_id
         ) customer_totals ON customer_totals.agent_case_id = latest_status.agent_case_id
       GROUP BY latest_status.disposition
       `,
-      [agentId, startDateStr, endDateStr, agentId, startDateStr, endDateStr]
+      [
+        agentId, startDateStr, endDateStr, 
+        startDateStr, endDateStr, 
+        agentId, startDateStr, endDateStr
+      ]
     );
 
     const formattedBreakdown = {
@@ -678,7 +688,6 @@ export const getAgentAnalytics = async (req, res) => {
 
     /* ==========================================
        SECTION B: CALL ACTIVITY & PTP OVERVIEW
-       FIX: Only counts Active PTPs. If Latest state is RTP/BRP, it zeros out.
        ========================================== */
     const [[callsAttendedRow]] = await pool.query(
       `SELECT COUNT(*) AS calls_attended FROM agent_dispositions WHERE agent_id = ? AND created_at BETWEEN ? AND ?`,
@@ -704,6 +713,7 @@ export const getAgentAnalytics = async (req, res) => {
 
     /* ==========================================
        SECTION C: MONTHLY SUMMARY (Calendar Month)
+       ✅ FIXED: Applies the same strict payment logic to the monthly totals
        ========================================== */
     const [[monthlyActuals]] = await pool.query(
       `
@@ -718,24 +728,33 @@ export const getAgentAnalytics = async (req, res) => {
             SELECT agent_case_id, MAX(id) AS latest_id
             FROM agent_dispositions
             WHERE agent_id = ? AND created_at BETWEEN ? AND ?
+              AND disposition IN ('PIF','SIF','FCL','PRT') -- 🟢 FIX
             GROUP BY agent_case_id
           ) latest ON latest.latest_id = ad.id
-          WHERE ad.disposition IN ('PIF','SIF','FCL','PRT')
         ) latest_status
       JOIN 
         (
-          SELECT agent_case_id, SUM(promise_amount) as total_paid
-          FROM agent_dispositions
-          WHERE agent_id = ? 
-            AND created_at BETWEEN ? AND ?
-            AND disposition IN ('PIF','SIF','FCL','PRT')
-          GROUP BY agent_case_id
+          SELECT ad.agent_case_id, 
+            COALESCE(SUM(CASE WHEN ad.disposition = 'PRT' THEN ad.promise_amount ELSE 0 END), 0) +
+            COALESCE((
+              SELECT promise_amount FROM agent_dispositions ad_sub 
+              WHERE ad_sub.agent_case_id = ad.agent_case_id AND ad_sub.disposition IN ('PIF','SIF','FCL') AND ad_sub.created_at BETWEEN ? AND ?
+              ORDER BY ad_sub.id DESC LIMIT 1
+            ), 0) AS total_paid
+          FROM agent_dispositions ad
+          WHERE ad.agent_id = ? 
+            AND ad.created_at BETWEEN ? AND ?
+            AND ad.disposition IN ('PIF','SIF','FCL','PRT')
+          GROUP BY ad.agent_case_id
         ) customer_totals ON customer_totals.agent_case_id = latest_status.agent_case_id
       `,
-      [agentId, monthlyStartStr, monthlyEndStr, agentId, monthlyStartStr, monthlyEndStr]
+      [
+        agentId, monthlyStartStr, monthlyEndStr, 
+        monthlyStartStr, monthlyEndStr, 
+        agentId, monthlyStartStr, monthlyEndStr
+      ]
     );
 
-    // FIX: Monthly Expected PTPs using Latest State Logic
     const [[monthlyExpected]] = await pool.query(
       `
       SELECT COALESCE(SUM(latest_ad.promise_amount), 0) AS expected_amount
@@ -871,7 +890,7 @@ export const getAgentDrilldown = async (req, res) => {
       return res.status(400).json({ message: "Disposition is required" });
     }
 
-    // 1. Calculate Date Range (Matches Agent Analytics logic)
+    // 1. Calculate Date Range
     const today = new Date();
     let startDate = new Date();
     let endDate = new Date();
@@ -913,10 +932,17 @@ export const getAgentDrilldown = async (req, res) => {
     // 2. Build the condition and parameters
     let dispositionCondition = "";
     
-    // FIX: We now need 6 base parameters (3 for identifying the latest row, 3 for calculating the sum)
+    // 🟢 FIX: Ensure the inner query only looks for the latest payment if drilling down into collections
+    let innerDispFilter = "";
+    if (disposition === "TOTAL_COLLECTED" || ["PIF", "SIF", "FCL", "PRT"].includes(disposition)) {
+      innerDispFilter = "AND ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT')";
+    }
+    
+    // 🟢 FIX: Aligned parameters to match the robust PRT + Terminal logic used in Admin
     const params = [
-      agentId, startDateStr, endDateStr, // For target_cases subquery
-      agentId, startDateStr, endDateStr  // For totals subquery
+      agentId, startDateStr, endDateStr, // 1. For target_cases subquery
+      startDateStr, endDateStr,          // 2. For nested terminal_paid subquery
+      agentId, startDateStr, endDateStr  // 3. For main totals subquery
     ];
 
     if (disposition === "TOTAL_COLLECTED") {
@@ -935,9 +961,9 @@ export const getAgentDrilldown = async (req, res) => {
         c.campaign_name, 
         latest_ad.disposition AS latest_disposition, 
         
-        -- FIX: If it is a cumulative transaction (PRT, etc.), show the SUM. If PTP, show the latest amount.
+        -- 🟢 FIX: Matches Admin logic to separate PRT sums from Terminal amounts
         CASE 
-          WHEN latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT') THEN COALESCE(totals.total_paid, 0)
+          WHEN latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT') THEN COALESCE(totals.prt_paid, 0) + COALESCE(totals.terminal_paid, 0)
           ELSE latest_ad.promise_amount 
         END AS amount, 
         
@@ -948,6 +974,7 @@ export const getAgentDrilldown = async (req, res) => {
         SELECT ad.agent_case_id, MAX(ad.id) AS max_ad_id
         FROM agent_dispositions ad
         WHERE ad.agent_id = ? AND ad.created_at BETWEEN ? AND ?
+        ${innerDispFilter}
         GROUP BY ad.agent_case_id
       ) target_cases
       JOIN agent_dispositions latest_ad ON latest_ad.id = target_cases.max_ad_id
@@ -955,18 +982,26 @@ export const getAgentDrilldown = async (req, res) => {
       LEFT JOIN coll_data cd ON cd.id = ac.coll_data_id 
       LEFT JOIN campaigns c ON c.id = cd.campaign_id
       
-      -- FIX: Calculate total payments for cumulative tracking to prevent missing historical PRT payments
+      -- 🟢 FIX: Calculate total payments using the exact same PRT + Terminal logic as Admin
       LEFT JOIN (
-        SELECT agent_case_id, SUM(promise_amount) AS total_paid
-        FROM agent_dispositions
-        WHERE agent_id = ? 
-          AND created_at BETWEEN ? AND ?
-          AND disposition IN ('PIF', 'SIF', 'FCL', 'PRT')
-        GROUP BY agent_case_id
+        SELECT ad2.agent_case_id, 
+          COALESCE(SUM(CASE WHEN ad2.disposition = 'PRT' THEN ad2.promise_amount ELSE 0 END), 0) AS prt_paid,
+          COALESCE((
+            SELECT promise_amount FROM agent_dispositions ad3
+            WHERE ad3.agent_case_id = ad2.agent_case_id AND ad3.disposition IN ('PIF','SIF','FCL') AND ad3.created_at BETWEEN ? AND ?
+            ORDER BY ad3.id DESC LIMIT 1
+          ), 0) AS terminal_paid
+        FROM agent_dispositions ad2
+        WHERE ad2.agent_id = ? 
+          AND ad2.created_at BETWEEN ? AND ?
+        GROUP BY ad2.agent_case_id
       ) totals ON totals.agent_case_id = latest_ad.agent_case_id
       
       WHERE ${dispositionCondition}
-      ORDER BY latest_ad.created_at DESC
+      
+      ORDER BY 
+        CASE WHEN latest_ad.disposition IN ('PIF', 'SIF', 'FCL', 'PRT') THEN latest_ad.payment_date ELSE latest_ad.follow_up_date END ASC, 
+        latest_ad.created_at DESC
       `,
       params
     );
