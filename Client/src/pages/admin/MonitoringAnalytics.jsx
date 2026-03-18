@@ -21,8 +21,12 @@ import {
   BarChart3,
   CheckCircle2,
   TrendingUp,
-  IndianRupee
+  IndianRupee,
+  TableProperties
 } from "lucide-react";
+import { 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell, Legend
+} from "recharts";
 import { Button } from "@/components/ui/button";
 import AdminNavbar from "../../components/AdminNavbar";
 
@@ -55,6 +59,15 @@ const MonitoringAnalytics = () => {
   const [isExporting, setIsExporting] = useState(false);
   const [drilldownStartDate, setDrilldownStartDate] = useState("");
   const [drilldownEndDate, setDrilldownEndDate] = useState("");
+
+  const [chartView, setChartView] = useState("campaigns"); // campaigns, agents, posRanges, bomBuckets
+  // Beautiful distinct colors for the different dispositions
+  const DISPOSITION_COLORS = [
+    "#6366f1", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", 
+    "#06b6d4", "#ec4899", "#f97316", "#84cc16", "#64748b"
+  ];
+
+  const [matrixView, setMatrixView] = useState("campVsBom");
 
   // Initialize dates to current calendar month
   useEffect(() => {
@@ -276,6 +289,109 @@ const MonitoringAnalytics = () => {
     const year = date.getFullYear();
     
     return `${day}/${month}/${year}`;
+  };
+
+  // Helper to render the dynamic Matrix Table
+  const renderMatrix = () => {
+    if (!analytics?.chartData) return null;
+    const dataObj = analytics.chartData;
+    let rowLabel, colLabel, rowKeys, colKeys, matrixData;
+
+    switch(matrixView) {
+      case "campVsBom":
+        rowLabel = "Campaigns"; colLabel = "BOM Buckets";
+        rowKeys = Object.keys(dataObj.campVsBom).sort();
+        colKeys = dataObj.bomBucketsList;
+        matrixData = dataObj.campVsBom;
+        break;
+      case "campVsPos":
+        rowLabel = "Campaigns"; colLabel = "POS Range";
+        rowKeys = Object.keys(dataObj.campVsPos).sort();
+        colKeys = dataObj.posRangesList;
+        matrixData = dataObj.campVsPos;
+        break;
+      case "agentVsBom":
+        rowLabel = "Agents"; colLabel = "BOM Buckets";
+        rowKeys = Object.keys(dataObj.agentVsBom).sort();
+        colKeys = dataObj.bomBucketsList;
+        matrixData = dataObj.agentVsBom;
+        break;
+      case "agentVsPos":
+        rowLabel = "Agents"; colLabel = "POS Range";
+        rowKeys = Object.keys(dataObj.agentVsPos).sort();
+        colKeys = dataObj.posRangesList;
+        matrixData = dataObj.agentVsPos;
+        break;
+      default: return null;
+    }
+
+    const colTotals = {};
+    colKeys.forEach(k => colTotals[k] = 0);
+
+    return (
+      <div className="w-full border border-slate-200 rounded-xl overflow-hidden mt-4">
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-sm text-left whitespace-nowrap">
+            <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+              <tr>
+                <th className="px-6 py-4 uppercase tracking-wider text-xs border-r border-slate-200 bg-slate-100">
+                  {rowLabel} &nbsp;/&nbsp; {colLabel}
+                </th>
+                {colKeys.map(col => (
+                  <th key={col} className="px-6 py-4 text-center uppercase tracking-wider text-xs">{col}</th>
+                ))}
+                <th className="px-6 py-4 text-center uppercase tracking-wider text-xs bg-indigo-50/50 border-l border-slate-200 text-indigo-700">
+                  Grand Total
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 bg-white">
+              {rowKeys.length === 0 ? (
+                <tr><td colSpan={colKeys.length + 2} className="px-6 py-8 text-center text-slate-400">No data available for this view.</td></tr>
+              ) : rowKeys.map(row => {
+                let rowTotal = 0;
+                return (
+                  <tr key={row} className="hover:bg-slate-50 transition-colors">
+                    <td className="px-6 py-4 font-bold text-slate-800 border-r border-slate-100 bg-slate-50/30">{row}</td>
+                    {colKeys.map(col => {
+                      const val = matrixData[row]?.[col] || 0;
+                      rowTotal += val;
+                      colTotals[col] += val;
+                      return (
+                        <td key={col} className="px-6 py-4 text-center font-medium text-slate-600">
+                          {val > 0 ? formatCurrency(val) : <span className="text-slate-300">-</span>}
+                        </td>
+                      );
+                    })}
+                    <td className="px-6 py-4 text-center font-bold text-indigo-600 bg-indigo-50/30 border-l border-slate-100">
+                      {formatCurrency(rowTotal)}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+            {rowKeys.length > 0 && (() => {
+               let absoluteTotal = Object.values(colTotals).reduce((a,b)=>a+b, 0);
+               return (
+                 <tfoot className="bg-slate-50 border-t-2 border-slate-200 font-bold text-slate-800">
+                   <tr>
+                     <td className="px-6 py-4 border-r border-slate-200 text-left uppercase text-xs tracking-wider text-slate-500">Total</td>
+                     {colKeys.map(col => (
+                       <td key={col} className="px-6 py-4 text-center text-emerald-600">
+                         {colTotals[col] > 0 ? formatCurrency(colTotals[col]) : "-"}
+                       </td>
+                     ))}
+                     <td className="px-6 py-4 text-center text-indigo-700 border-l border-slate-200 bg-indigo-50/50">
+                       {formatCurrency(absoluteTotal)}
+                     </td>
+                   </tr>
+                 </tfoot>
+               )
+            })()}
+          </table>
+        </div>
+      </div>
+    );
   };
 
   if (!analytics && !error) {
@@ -689,8 +805,103 @@ const MonitoringAnalytics = () => {
             </div>
           </div>
         </div>
+        
+        {/* SECTION D: Collection Matrix (Dynamic Tabs) */}
+        {analytics?.chartData && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 mb-8 animate-in fade-in duration-500">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-6">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-indigo-50 rounded-lg">
+                  <TableProperties className="w-5 h-5 text-indigo-600" />
+                </div>
+                <div>
+                  <h2 className="text-xl font-bold text-slate-800">Collection Matrices</h2>
+                  <p className="text-xs text-slate-500 mt-1">Cross-tabulated views of collected amounts</p>
+                </div>
+              </div>
+              
+              <div className="flex bg-slate-100/80 p-1.5 rounded-xl border border-slate-200 overflow-x-auto">
+                {[
+                  { id: "campVsBom", label: "Campaign × BOM" },
+                  { id: "campVsPos", label: "Campaign × POS" },
+                  { id: "agentVsBom", label: "Agent × BOM" },
+                  { id: "agentVsPos", label: "Agent × POS" }
+                ].map(view => (
+                  <button
+                    key={view.id}
+                    onClick={() => setMatrixView(view.id)}
+                    className={`whitespace-nowrap px-4 py-2 text-sm font-bold rounded-lg transition-all duration-200 ${
+                      matrixView === view.id 
+                        ? "bg-white text-indigo-700 shadow-sm ring-1 ring-slate-200" 
+                        : "text-slate-500 hover:text-slate-800"
+                    }`}
+                  >
+                    {view.label}
+                  </button>
+                ))}
+              </div>
+            </div>
 
-        {/* SECTION D: Monthly Summary */}
+            {renderMatrix()}
+          </div>
+        )}
+
+        {/* SECTION E: Agent Disposition Breakdown Table */}
+        {analytics?.agentDispositionChart && analytics.agentDispositionChart.length > 0 && (
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 mb-8 animate-in fade-in duration-500">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="p-2 bg-fuchsia-50 rounded-lg">
+                <Users className="w-5 h-5 text-fuchsia-600" />
+              </div>
+              <div>
+                <h2 className="text-xl font-bold text-slate-800">Agent Disposition Breakdown</h2>
+                <p className="text-xs text-slate-500 mt-1">Volume and types of calls handled per agent</p>
+              </div>
+            </div>
+
+            <div className="w-full border border-slate-200 rounded-xl overflow-hidden">
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-sm text-left whitespace-nowrap">
+                  <thead className="bg-slate-50 text-slate-600 font-semibold border-b border-slate-200">
+                    <tr>
+                      <th className="px-6 py-4 uppercase tracking-wider text-xs">Agent Name</th>
+                      {analytics.dispositionTypes.map(disp => (
+                        <th key={disp} className="px-6 py-4 text-center uppercase tracking-wider text-xs">{disp}</th>
+                      ))}
+                      <th className="px-6 py-4 text-center uppercase tracking-wider text-xs bg-slate-100 border-l border-slate-200">Total Calls</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 bg-white">
+                    {analytics.agentDispositionChart.map((agentRow, index) => {
+                      const totalCalls = analytics.dispositionTypes.reduce((sum, disp) => sum + (agentRow[disp] || 0), 0);
+                      return (
+                        <tr key={index} className="hover:bg-slate-50 transition-colors">
+                          <td className="px-6 py-4 font-bold text-slate-800">{agentRow.name}</td>
+                          
+                          {analytics.dispositionTypes.map(disp => (
+                            <td key={disp} className="px-6 py-4 text-center font-medium text-slate-600">
+                              {agentRow[disp] > 0 ? (
+                                <span className="bg-slate-100 px-2 py-1 rounded text-slate-700">{agentRow[disp]}</span>
+                              ) : (
+                                <span className="text-slate-300">-</span>
+                              )}
+                            </td>
+                          ))}
+                          
+                          <td className="px-6 py-4 text-center font-bold text-indigo-600 bg-slate-50/50 border-l border-slate-100">
+                            {totalCalls}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* SECTION F: Monthly Summary */}
         {monthlySummary && (
           <div className="bg-white rounded-2xl shadow-sm border border-slate-900 p-6 md:p-8 mt-8 relative overflow-hidden">
             <div className="absolute top-0 right-0 -mt-10 -mr-10 w-64 h-64 bg-gradient-to-br from-indigo-100/50 to-purple-50/50 rounded-full blur-3xl pointer-events-none"></div>
