@@ -75,10 +75,16 @@ const MonitoringAnalytics = () => {
     const firstDay = new Date(today.getFullYear(), today.getMonth(), 1);
     const lastDay = new Date(today.getFullYear(), today.getMonth() + 1, 0);
 
-    const formatDate = (date) => date.toISOString().split("T")[0];
+    // 🟢 FIX: Use local time formatting instead of toISOString() to prevent UTC timezone shifts
+    const formatDateLocal = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
 
-    setStartDate(formatDate(firstDay));
-    setEndDate(formatDate(lastDay));
+    setStartDate(formatDateLocal(firstDay));
+    setEndDate(formatDateLocal(lastDay));
   }, []);
 
   const handleDateFilterChange = (filter) => {
@@ -111,9 +117,17 @@ const MonitoringAnalytics = () => {
       default:
         return;
     }
-    const formatDate = (date) => date.toISOString().split("T")[0];
-    setStartDate(formatDate(start));
-    setEndDate(formatDate(end));
+    
+    // 🟢 FIX: Use local time formatting instead of toISOString()
+    const formatDateLocal = (date) => {
+      const y = date.getFullYear();
+      const m = String(date.getMonth() + 1).padStart(2, '0');
+      const d = String(date.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
+    };
+    
+    setStartDate(formatDateLocal(start));
+    setEndDate(formatDateLocal(end));
   };
 
   // FIX: Fetch Options, auto-select them, then flag as initialized
@@ -503,7 +517,9 @@ const MonitoringAnalytics = () => {
                   {campaigns.map((c) => (
                     <label
                       key={c.id}
-                      className="flex items-center gap-3 cursor-pointer p-1.5 hover:bg-white rounded-md transition-colors"
+                      className={`flex items-center gap-3 cursor-pointer p-1.5 rounded-md transition-colors ${
+                        c.status === 'INACTIVE' ? 'opacity-70 hover:bg-slate-100' : 'hover:bg-white'
+                      }`}
                     >
                       <input
                         type="checkbox"
@@ -511,7 +527,14 @@ const MonitoringAnalytics = () => {
                         onChange={() => toggleCampaign(c.id)}
                         className="w-4 h-4 text-blue-600 border-slate-300 rounded focus:ring-blue-500 cursor-pointer"
                       />
-                      <span className="text-sm font-medium text-slate-700">{c.campaign_name}</span>
+                      <span className="text-sm font-medium text-slate-700">
+                        {c.campaign_name} 
+                        {c.status === 'INACTIVE' && (
+                          <span className="ml-2 text-[10px] uppercase tracking-wider bg-rose-100 text-rose-600 px-1.5 py-0.5 rounded font-bold">
+                            Inactive
+                          </span>
+                        )}
+                      </span>
                     </label>
                   ))}
                 </div>

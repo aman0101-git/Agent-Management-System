@@ -112,7 +112,8 @@ const ManageCampaigns = () => {
 
   const toggleCampaign = async (id, status) => {
     try {
-      await axios.patch(
+      // FIX: Upgraded to axios.put to resolve CORS Method Not Allowed error
+      await axios.put(
         `http://localhost:5000/api/campaigns/${id}/${
           status === "ACTIVE" ? "deactivate" : "activate"
         }`,
@@ -121,7 +122,7 @@ const ManageCampaigns = () => {
       );
       fetchCampaigns();
     } catch {
-      setError("Failed to update campaign");
+      setError("Failed to update campaign status");
     }
   };
 
