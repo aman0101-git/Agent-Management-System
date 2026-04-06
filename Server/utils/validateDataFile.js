@@ -17,37 +17,74 @@ export const normalize = (str) =>
     .replace(/^_+|_+$/g, "");
 
 // ================= HEADER ALIASES =================
-// UPDATED: Expanded massively to catch variations of Excel headers
 const HEADER_ALIASES = {
   loan_agreement_no: ["loan agreement no", "loan id", "agreement no", "lan", "account no"],
   branch_name: ["branch name", "branch"],
+  appl_id: ["appl id", "application id"],
+  child_loan1: ["child loan1", "child loan 1"],
+  child_loan2: ["child loan2", "child loan 2"],
   hub_name: ["hub name", "hub"],
-  cust_name: ["customer name", "cust name", "name", "borrower name"],
   cust_id: ["customer id", "customer_id", "cust id"],
+  cust_name: ["customer name", "cust name", "name", "borrower name"],
   mobileno: ["mobile number", "mobile", "phone", "contact no"],
+  
+  // Mapped "MO NO" from your Excel to contact_no1
+  contact_no1: ["contact no1", "contact no 1", "alt contact", "mo no"], 
+  
+  ph_no_res: ["ph no res", "res phone", "residence phone"],
   pos: ["pos", "principal outstanding", "principal"],
   insl_amt: ["inst amt", "inst_amt", "installment amount", "emi", "emi amount"],
   inst_over: ["inst over", "installment overdue", "emi overdue"],
   penal_over: ["penal over", "penalty overdue", "penalty over"],
   penal_intrst: ["penal interest", "penal int", "penalty interest"],
+  chq_bnc_chrg: ["chq bnc chrg", "cheque bounce charge", "bounce charge"],
   amount_finance: ["amt fin", "amount finance", "financed amount", "loan amount"],
   tenure: ["tenure", "loan tenure"],
   loan_status: ["status", "loan status"],
   res_addr: ["residence address", "res addr", "address"],
   off_addr: ["office address", "off addr"],
-  agency: ["agency", "collection agency"],
+  
+  // Mapped "AGENCY NAME" from your Excel to agency
+  agency: ["agency", "collection agency", "agency name"],
+  
   feedback: ["feedback", "remarks"],
   fdd: ["fdd", "first due date"],
-  bom_bucket: ["bom bucket", "bucket", "bom"],
-  group_name: ["group", "group name"],
+  bom_bucket: ["bom bucket", "bucket", "bom", "bom_bucket"],
+  
+  // Mapped "Sub Group" from your Excel to group_name
+  group_name: ["group", "group name", "sub group"],
+  
   disb_date: ["disbursal date", "disb date"],
-  maturity_date: ["maturity date"],
+  
+  // Mapped "MATURITY DT" from your Excel to maturity_date
+  maturity_date: ["maturity date", "maturity dt"],
+  
+  expiry_date: ["expiry date", "exp date"],
+  dob: ["dob", "date of birth"],
   ptp_date: ["ptp date"],
   dpd: ["dpd", "days past due"],
   product_code: ["product", "product code"],
+  product_id: ["product id"],
   amt_outst: ["amount outstanding", "amt outst", "total outstanding", "os"],
   tos: ["tos", "total over due", "total overdue"],
-  fresh_vintage_regular: ["fresh vintage regular", "fresh_vintage_regular"],
+  
+  // Mapped "Fresh_Stab" from your Excel to fresh_vintage_regular
+  fresh_vintage_regular: ["fresh vintage regular", "fresh_vintage_regular", "vintage", "fresh/regular", "fresh vintage", "fresh_stab", "fresh stab"],
+  
+  state: ["state", "customer state", "state name"],
+  bank_name: ["bank name", "bank"],
+  reason_bounc_chek: ["reason bounce cheque", "reason_bounc_chek", "bounce reason"],
+  asset_category: ["asset category", "asset_category"],
+  asset_desc: ["asset desc", "asset description"],
+  disb_dlr_name: ["disb dlr name", "disbursal dealer", "dealer name"],
+  max_txn_entry_date: ["max txn entry date", "max_txn_entry_date"],
+  days_diff_max_txn_dt: ["days diff max txn dt", "days_diff_max_txn_dt"],
+  month_diff_exp_dt: ["month diff exp dt", "month_diff_exp_dt"],
+  last_paid_amount: ["last paid amount", "last_paid_amount"],
+  last_paid_date: ["last paid date", "last_paid_date"],
+  emi_pending_count: ["emi pending count", "emi_pending_count"],
+  sif_allowed: ["sif allowed", "sif_allowed"],
+  current_org: ["current org", "current_org", "organization"]
 };
 
 // ================= HEADER MAPPING =================

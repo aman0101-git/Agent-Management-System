@@ -121,7 +121,12 @@ export const ingestLoans = async (req, res) => {
       .map(col => `${col} = VALUES(${col})`)
       .join(", ");
 
+    // CRITICAL FIX: If a loan is uploaded into a NEW campaign, this safely 
+    // resets the agent_id to NULL and makes it active so agents can fetch it again!
     const fullUpdateClause = `
+      agent_id = IF(campaign_id != VALUES(campaign_id), NULL, agent_id),
+      is_active = IF(campaign_id != VALUES(campaign_id), 1, is_active),
+      campaign_id = VALUES(campaign_id),
       batch_month = VALUES(batch_month),
       batch_year = VALUES(batch_year),
       extra_fields = VALUES(extra_fields),

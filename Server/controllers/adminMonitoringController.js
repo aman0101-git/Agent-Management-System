@@ -17,8 +17,9 @@ export const getMonitoringAgents = async (req, res) => {
 
 export const getMonitoringCampaigns = async (req, res) => {
   try {
+    // 🟢 FIX: Fetch ALL campaigns (Active & Inactive) so admins can filter historical data
     const [campaigns] = await pool.query(`
-      SELECT id, campaign_name FROM campaigns WHERE status = 'ACTIVE' ORDER BY campaign_name
+      SELECT id, campaign_name, status FROM campaigns ORDER BY status ASC, campaign_name ASC
     `);
     res.json({ campaigns });
   } catch (err) {
@@ -265,13 +266,15 @@ export const getMonitoringAnalytics = async (req, res) => {
     } else if (campaign_id !== "ALL") {
       const campaignIds = campaign_id.split(",").map((id) => id.trim());
       const placeholders = campaignIds.map(() => "?").join(",");
+      // 🟢 FIX: Removed "AND status = 'ACTIVE'" so historical targets are preserved
       const [[row]] = await pool.query(
-        `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE id IN (${placeholders}) AND status = 'ACTIVE'`,
+        `SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE id IN (${placeholders})`,
         campaignIds
       );
       targetAmount = row?.target_amount || 0;
     } else {
-      const [[row]] = await pool.query(`SELECT SUM(target_amount) AS target_amount FROM campaigns WHERE status = 'ACTIVE'`);
+      // 🟢 FIX: Removed "AND status = 'ACTIVE'" so historical targets are preserved
+      const [[row]] = await pool.query(`SELECT SUM(target_amount) AS target_amount FROM campaigns`);
       targetAmount = row?.target_amount || 0;
     }
 
