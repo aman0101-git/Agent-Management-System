@@ -13,16 +13,17 @@ export const exportMasterData = async (req, res) => {
     let whereClauses = [];
     let params = [];
 
-    // 1. Date Filter (Filtering by customer upload/creation date)
+    // 1. FIX: Date Filter now checks Upload Date, Campaign Update Date, OR Disposition Date
+    // This ensures recycled leads and newly worked leads are never missed!
     if (from && to) {
-      whereClauses.push(`cd.created_at BETWEEN ? AND ?`);
-      params.push(`${from} 00:00:00`, `${to} 23:59:59`);
+      whereClauses.push(`(cd.created_at BETWEEN ? AND ? OR cd.updated_at BETWEEN ? AND ? OR latest_ad.created_at BETWEEN ? AND ?)`);
+      params.push(`${from} 00:00:00`, `${to} 23:59:59`, `${from} 00:00:00`, `${to} 23:59:59`, `${from} 00:00:00`, `${to} 23:59:59`);
     } else if (from) {
-      whereClauses.push(`cd.created_at >= ?`);
-      params.push(`${from} 00:00:00`);
+      whereClauses.push(`(cd.created_at >= ? OR cd.updated_at >= ? OR latest_ad.created_at >= ?)`);
+      params.push(`${from} 00:00:00`, `${from} 00:00:00`, `${from} 00:00:00`);
     } else if (to) {
-      whereClauses.push(`cd.created_at <= ?`);
-      params.push(`${to} 23:59:59`);
+      whereClauses.push(`(cd.created_at <= ? OR cd.updated_at <= ? OR latest_ad.created_at <= ?)`);
+      params.push(`${to} 23:59:59`, `${to} 23:59:59`, `${to} 23:59:59`);
     }
 
     // 2. Agents Filter (Multi-select)
@@ -43,7 +44,7 @@ export const exportMasterData = async (req, res) => {
 
     let whereSQL = whereClauses.length > 0 ? `WHERE ` + whereClauses.join(' AND ') : '';
 
-    // 1. Fetch Master Data (One row per unique customer, with dynamic WHERE)
+    // 1. Fetch Master Data
     const mainQuery = `
       SELECT 
         cd.*,
@@ -62,14 +63,23 @@ export const exportMasterData = async (req, res) => {
         IF(coc_ptp.id IS NOT NULL, 'YES', 'NO') AS EVER_PTP,
         IF(coc_prt.id IS NOT NULL, 'YES', 'NO') AS EVER_PRT
       FROM coll_data cd
-      LEFT JOIN agent_cases ac ON cd.id = ac.coll_data_id
+      
+      /* FIX: Join ONLY the latest agent_case to prevent duplicate rows in Excel for re-churned leads */
+      LEFT JOIN (
+        SELECT ac1.* FROM agent_cases ac1
+        JOIN (SELECT coll_data_id, MAX(id) as max_id FROM agent_cases GROUP BY coll_data_id) ac2 
+        ON ac1.id = ac2.max_id
+      ) ac ON cd.id = ac.coll_data_id
+      
       LEFT JOIN campaigns c ON cd.campaign_id = c.id
       LEFT JOIN users u ON ac.agent_id = u.id
+      
       LEFT JOIN (
         SELECT ad1.* FROM agent_dispositions ad1
         JOIN (SELECT agent_case_id, MAX(id) as max_id FROM agent_dispositions GROUP BY agent_case_id) ad2 
         ON ad1.id = ad2.max_id
       ) latest_ad ON latest_ad.agent_case_id = ac.id
+      
       LEFT JOIN customer_once_constraints coc_ptp 
         ON coc_ptp.coll_data_id = cd.id AND coc_ptp.constraint_type = 'ONCE_PTP'
       LEFT JOIN customer_once_constraints coc_prt 
@@ -191,6 +201,7 @@ export const exportMasterData = async (req, res) => {
     res.status(500).json({ message: "Master Export failed" });
   }
 };
+
 /**
  * POST /api/admin/agent-targets
  * Admin assigns monthly target to an agent
