@@ -13,6 +13,7 @@ import {
   getAgentTarget,
   setAgentTarget,
   getOnceConstraints,
+  getAgentDrilldown
 } from '../controllers/agentController.js';
 
 import {
@@ -114,6 +115,16 @@ router.get(
   protect,
   allowRoles('AGENT'),
   getAgentAnalytics
+);
+
+/**
+ * Get agent performance analytics drilldown list
+ */
+router.get(
+  '/analytics/drilldown',
+  protect,
+  allowRoles('AGENT'),
+  getAgentDrilldown
 );
 
 /**

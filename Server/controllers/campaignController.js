@@ -70,19 +70,53 @@ export const listAllCampaigns = async (req, res) => {
   }
 };
 
-// Deactivate campaign
+// Deactivate campaign (Industry Standard Clean Shutdown)
 export const deactivateCampaign = async (req, res) => {
+  const conn = await pool.getConnection();
   try {
     const { id } = req.params;
+    await conn.beginTransaction();
 
-    await pool.query(
+    // 1. Mark the campaign as INACTIVE
+    await conn.query(
       "UPDATE campaigns SET status = 'INACTIVE' WHERE id = ?",
       [id]
     );
 
-    res.json({ message: "Campaign deactivated" });
+    // 2. The "Clean Shutdown": Find any leads the agents are currently holding 
+    // for this dead campaign and pull them back to the unassigned pool.
+    const [activeCases] = await conn.query(
+      `SELECT cd.id FROM Coll_Data cd
+       LEFT JOIN agent_cases ac ON ac.coll_data_id = cd.id
+       WHERE cd.campaign_id = ? 
+         AND ac.status = 'IN_PROGRESS' 
+         AND cd.is_active = TRUE`,
+      [id]
+    );
+
+    if (activeCases.length > 0) {
+      const caseIds = activeCases.map(c => c.id);
+      
+      // Unassign the agents
+      await conn.query(
+        `UPDATE Coll_Data SET agent_id = NULL WHERE id IN (?)`, 
+        [caseIds]
+      );
+      
+      // Reset the agent_case tracking status so it's safe to fetch later
+      await conn.query(
+        `UPDATE agent_cases SET status = 'NEW', is_active = 0 WHERE coll_data_id IN (?)`, 
+        [caseIds]
+      );
+    }
+
+    await conn.commit();
+    res.json({ message: "Campaign deactivated and pending leads successfully released." });
   } catch (err) {
+    await conn.rollback();
     res.status(500).json({ message: err.message });
+  } finally {
+    conn.release();
   }
 };
 
@@ -96,7 +130,7 @@ export const activateCampaign = async (req, res) => {
       [id]
     );
 
-    res.json({ message: "Campaign activated" });
+    res.json({ message: "Campaign activated successfully." });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
@@ -254,6 +288,7 @@ export const getRechurnData = async (req, res) => {
         cd.loan_agreement_no AS loan_id,
         cd.insl_amt,
         cd.pos,
+        cd.bom_bucket,
         cd.created_at AS allocation_date,
 
         u.firstName AS last_agent_first_name,

@@ -62,6 +62,14 @@ const AdminDashboard = () => {
               base: "from-pink-500 to-rose-500",
               hover: "hover:from-pink-600 hover:to-rose-600",
             },
+            {
+              title: "Global Customer Search",
+              desc: "Search, view, and modify any customer in the system.",
+              action: "Search Customers",
+              link: "/admin/search",
+              base: "from-fuchsia-500 to-purple-500",
+              hover: "hover:from-fuchsia-600 hover:to-purple-600",
+            },
           ].map((item) => (
             <div
               key={item.title}

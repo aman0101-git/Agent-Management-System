@@ -29,8 +29,8 @@ router.post("/", protect, allowRoles("ADMIN"), createCampaign);
 router.patch("/:id", protect, allowRoles("ADMIN"), updateCampaignName);
 
 // Activate / Deactivate
-router.patch("/:id/activate", protect, allowRoles("ADMIN"), activateCampaign);
-router.patch("/:id/deactivate", protect, allowRoles("ADMIN"), deactivateCampaign);
+router.put("/:id/activate", protect, allowRoles("ADMIN"), activateCampaign);
+router.put("/:id/deactivate", protect, allowRoles("ADMIN"), deactivateCampaign);
 
 // Distribute data to agents
 router.post(

@@ -9,34 +9,49 @@ import {
   getAllAgentTargets,
   updateAgentTarget,
   deleteAgentTarget,
-  exportAdminData,
+  exportMasterData,
 } from '../controllers/adminController.js';
 
 import {
   getMonitoringAnalytics,
   getMonitoringAgents,
   getMonitoringCampaigns,
+  getMonitoringDrilldown,
+  exportMonitoringDrilldown,
 } from '../controllers/adminMonitoringController.js';
 
-import { exportSingleTable } from "../controllers/adminController.js";
+import {
+  searchGlobalCustomers,
+  getAdminCaseById,
+  submitAdminDisposition,
+  startAdminCustomerVisit,
+  endAdminCustomerVisit,
+  getAdminCustomerVisitHistory,
+  getAdminOnceConstraints
+} from '../controllers/adminController.js';
 
 const router = express.Router();
 
+// === GLOBAL CUSTOMER SEARCH & DISPOSITION ===
+router.post('/search', protect, allowRoles('ADMIN'), searchGlobalCustomers);
+router.get('/cases/:caseId', protect, allowRoles('ADMIN'), getAdminCaseById);
+router.post('/cases/:caseId/disposition', protect, allowRoles('ADMIN'), submitAdminDisposition);
+
+// === ADMIN VISIT HISTORY ===
+router.post('/customer-visit/start', protect, allowRoles('ADMIN'), startAdminCustomerVisit);
+router.post('/customer-visit/end', protect, allowRoles('ADMIN'), endAdminCustomerVisit);
+router.get('/customer-visit/history/:customerId', protect, allowRoles('ADMIN'), getAdminCustomerVisitHistory);
+router.get('/customers/:collDataId/once-constraints', protect, allowRoles('ADMIN'), getAdminOnceConstraints);
+
 /**
- * Export MySQL data to Excel (admin only)
+ * GET /api/admin/exports/master
+ * Master data export with dynamic columns
  */
 router.get(
-  '/exports',
-  protect,
-  allowRoles('ADMIN'),
-  exportAdminData
-);
-
-router.get(
-  "/exports/table",
+  "/exports/master",
   protect,
   allowRoles("ADMIN"),
-  exportSingleTable
+  exportMasterData
 );
 
 /**
@@ -120,6 +135,28 @@ router.get(
   protect,
   allowRoles('ADMIN'),
   getMonitoringCampaigns
+);
+
+/**
+ * GET /api/admin/monitoring-analytics/drilldown
+ * Get detailed list of customers for a specific disposition
+ */
+router.get(
+  '/monitoring-analytics/drilldown',
+  protect,
+  allowRoles('ADMIN'),
+  getMonitoringDrilldown
+);
+
+/**
+ * GET /api/admin/monitoring-analytics/drilldown/export
+ * Export drilldown list to CSV
+ */
+router.get(
+  '/monitoring-analytics/drilldown/export',
+  protect,
+  allowRoles('ADMIN'),
+  exportMonitoringDrilldown
 );
 
 export default router;

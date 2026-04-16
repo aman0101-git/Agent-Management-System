@@ -63,7 +63,7 @@ const Login = () => {
                     </FormLabel>
                     <FormControl>
                       <Input
-                        placeholder="FC0001"
+                        placeholder="FCS0001"
                         {...field}
                         className="bg-slate-50 border-slate-300 focus:border-teal-500 focus:ring-2 focus:ring-teal-400/40"
                       />

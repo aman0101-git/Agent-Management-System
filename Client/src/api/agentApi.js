@@ -169,3 +169,22 @@ export const fetchCustomerVisitHistory = async (customerId, token) => {
   });
   return res.data;
 };
+
+// Fetch agent performance analytics drilldown list
+export const fetchAgentDrilldown = async (disposition, timeFilter, token, fromDate, toDate) => {
+  const params = { disposition, timeFilter };
+  
+  if (timeFilter === 'custom' && fromDate && toDate) {
+    params.fromDate = fromDate;
+    params.toDate = toDate;
+  }
+  
+  const res = await axios.get(`${API_BASE}/analytics/drilldown`, {
+    params,
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+
+  return res.data.data;
+};

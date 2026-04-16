@@ -80,7 +80,19 @@ export const getCustomerVisitHistory = async (req, res) => {
       SELECT 
         acv.entry_time, 
         acv.exit_time,
-        u.username
+        u.username,
+        -- Fetch the disposition submitted during this specific visit
+        (
+          SELECT ad.disposition
+          FROM agent_dispositions ad
+          JOIN agent_cases ac ON ad.agent_case_id = ac.id
+          WHERE ac.coll_data_id = acv.customer_id
+            AND ad.agent_id = acv.agent_id
+            AND ad.created_at >= acv.entry_time
+            AND (acv.exit_time IS NULL OR ad.created_at <= acv.exit_time)
+          ORDER BY ad.created_at DESC
+          LIMIT 1
+        ) AS disposition
       FROM agent_customer_visits acv
       LEFT JOIN users u ON u.id = acv.agent_id
       WHERE acv.customer_id = ? 
